@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Выборы{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h5>Выборы</h5>
+    <span class="row-count-label">Найдено: {{ found }}</span>
+</div>
+
+<div class="dash-row five mb-4">
+    <div>
+        <div class="dash-card">
+            <div class="dash-card-icon" style="background:rgba(37,99,235,.12);color:#2563eb">Д</div>
+            <div><div class="dash-card-num">{{ counts.voted.deg }}</div><div class="dash-card-lbl">ДЭГ</div></div>
+        </div>
+    </div>
+    <div>
+        <div class="dash-card">
+            <div class="dash-card-icon" style="background:rgba(42,120,214,.12);color:#2a78d6">У</div>
+            <div><div class="dash-card-num">{{ counts.voted.uik }}</div><div class="dash-card-lbl">УИК</div></div>
+        </div>
+    </div>
+    <div>
+        <div class="dash-card">
+            <div class="dash-card-icon" style="background:rgba(235,104,52,.12);color:#eb6834">В</div>
+            <div><div class="dash-card-num">{{ counts.voted.uvz }}</div><div class="dash-card-lbl">УИК-УВЗ</div></div>
+        </div>
+    </div>
+    <div>
+        <div class="dash-card">
+            <div class="dash-card-icon" style="background:rgba(22,163,74,.12);color:#16a34a">Σ</div>
+            <div><div class="dash-card-num">{{ counts.voted.total }}</div><div class="dash-card-lbl">ИТОГО</div></div>
+        </div>
+    </div>
+    <div>
+        <div class="dash-card red">
+            <div class="dash-card-icon" style="background:rgba(190,12,12,.12);color:#be0c0c">!</div>
+            <div><div class="dash-card-num">{{ counts.no_uik }}</div><div class="dash-card-lbl">Пусто УИК</div></div>
+        </div>
+    </div>
+</div>
+
+{% include "_filters.html" with with_status=1 %}
+
+<div class="card-block mb-3">
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+        <button class="btn-orange" type="button" id="bulk-on">Отметить всех отфильтрованных</button>
+        <button class="btn-ghost" type="button" id="bulk-off">Снять отметку</button>
+        <span class="row-count-label">будет затронуто записей: {{ found }}</span>
+    </div>
+    <div class="ok-msg" id="bulk-msg" style="display:none"></div>
+</div>
+
+<div class="table-container">
+<table class="report-table">
+    <thead><tr><th>Цех</th><th>Таб№</th><th>ФИО</th><th>УИК</th><th>Способ</th><th>Явка</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+        <tr>
+            <td>{{ r.department }}</td>
+            <td>{{ r.tab_number }}</td>
+            <td class="wrap">{{ r.fio }}</td>
+            <td>{{ r.uik }}</td>
+            <td>{{ r.method_label }}</td>
+            <td>
+                <button type="button" class="vote-btn {% if r.voted %}on{% endif %}" data-id="{{ r.id }}">
+                    {% if r.voted %}Проголосовал{% else %}Не голосовал{% endif %}
+                </button>
+            </td>
+        </tr>
+    {% empty %}
+        <tr><td colspan="6">Нет данных</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% include "_pagination.html" %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function setCounts(c) {
+    var n = document.querySelectorAll('.dash-card-num');
+    n[0].textContent = c.voted.deg;
+    n[1].textContent = c.voted.uik;
+    n[2].textContent = c.voted.uvz;
+    n[3].textContent = c.voted.total;
+    n[4].textContent = c.no_uik;
+}
+document.querySelectorAll('.vote-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        var on = btn.classList.contains('on');
+        postJSON('/api/voted/', {
+            id: btn.dataset.id,
+            voted: !on
+        }).then(function (c) {
+            btn.classList.toggle('on', !on);
+            btn.textContent = on ? 'Не голосовал' : 'Проголосовал';
+            setCounts(c);
+        });
+    });
+});
+function bulk(voted) {
+    postJSON('/api/bulk-voted/', {voted: voted}).then(function (c) {
+        setCounts(c);
+        var msg = document.getElementById('bulk-msg');
+        msg.textContent = 'Изменено записей: ' + c.changed;
+        msg.style.display = 'block';
+        document.querySelectorAll('.vote-btn').forEach(function (b) {
+            b.classList.toggle('on', voted);
+            b.textContent = voted ? 'Проголосовал' : 'Не голосовал';
+        });
+    });
+}
+document.getElementById('bulk-on').addEventListener('click', function () { bulk(true); });
+document.getElementById('bulk-off').addEventListener('click', function () { bulk(false); });
+</script>
+{% endblock %}

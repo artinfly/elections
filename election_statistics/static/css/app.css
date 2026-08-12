@@ -1,0 +1,13 @@
+.seg{display:inline-flex;gap:4px}
+.seg button{border:1px solid #ddd;background:#fff;border-radius:5px;padding:.18rem .6rem;font-size:.75rem;cursor:pointer;font-family:inherit;color:#555;transition:all .12s}
+.seg button:hover{border-color:var(--orange);color:var(--orange)}
+.seg button.on{background:var(--orange);border-color:var(--orange);color:#fff;font-weight:600}
+.vote-btn{border:1px solid #ddd;background:#fff;border-radius:5px;padding:.18rem .7rem;font-size:.75rem;cursor:pointer;font-family:inherit;color:#555;transition:all .12s}
+.vote-btn:hover{border-color:#16a34a;color:#16a34a}
+.vote-btn.on{background:rgba(22,163,74,.12);border-color:#16a34a;color:#16a34a;font-weight:600}
+.dash-card.red .dash-card-num{color:#be0c0c}
+.dash-row.five>div{flex:0 0 calc(20% - 10px)}
+@media(max-width:992px){.dash-row.five>div{flex:0 0 calc(50% - 6px)}}
+.hint{font-size:.75rem;color:var(--text-muted);margin-top:.35rem}
+.ok-msg{font-size:.8rem;color:#16a34a;background:rgba(22,163,74,.1);border-radius:5px;padding:.45rem .75rem;margin-top:10px}
+textarea.form-control{min-height:70px;resize:vertical;margin-top:8px}.err-msg{font-size:.8rem;color:#be0c0c;background:rgba(190,12,12,.1);border-radius:5px;padding:.45rem .75rem;margin-bottom:12px}

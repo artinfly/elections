@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Способ голосования{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h5>Способ голосования</h5>
+    <span class="row-count-label">Найдено: {{ found }}</span>
+</div>
+
+<div class="dash-row five mb-4">
+    <div>
+        <div class="dash-card">
+            <div class="dash-card-icon" style="background:rgba(37,99,235,.12);color:#2563eb">Д</div>
+            <div><div class="dash-card-num">{{ counts.method.deg }}</div><div class="dash-card-lbl">ДЭГ</div></div>
+        </div>
+    </div>
+    <div>
+        <div class="dash-card">
+            <div class="dash-card-icon" style="background:rgba(42,120,214,.12);color:#2a78d6">У</div>
+            <div><div class="dash-card-num">{{ counts.method.uik }}</div><div class="dash-card-lbl">УИК</div></div>
+        </div>
+    </div>
+    <div>
+        <div class="dash-card">
+            <div class="dash-card-icon" style="background:rgba(235,104,52,.12);color:#eb6834">В</div>
+            <div><div class="dash-card-num">{{ counts.method.uvz }}</div><div class="dash-card-lbl">УИК-УВЗ</div></div>
+        </div>
+    </div>
+    <div>
+        <div class="dash-card">
+            <div class="dash-card-icon" style="background:rgba(136,136,136,.12);color:#888">—</div>
+            <div><div class="dash-card-num">{{ counts.method.none }}</div><div class="dash-card-lbl">Не назначен</div></div>
+        </div>
+    </div>
+    <div>
+        <div class="dash-card">
+            <div class="dash-card-icon" style="background:rgba(224,123,42,.12);color:#e07b2a">Σ</div>
+            <div><div class="dash-card-num">{{ counts.method.total }}</div><div class="dash-card-lbl">Всего</div></div>
+        </div>
+    </div>
+</div>
+
+{% include "_filters.html" %}
+
+<div class="table-container">
+<table class="report-table">
+    <thead><tr><th>Цех</th><th>Таб№</th><th>ФИО</th><th>УИК</th><th>Способ</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+        <tr>
+            <td>{{ r.department }}</td>
+            <td>{{ r.tab_number }}</td>
+            <td class="wrap">{{ r.fio }}</td>
+            <td>{{ r.uik }}</td>
+            <td>
+                <span class="seg" data-id="{{ r.id }}">
+                    {% for code, label in methods %}
+                    <button type="button" data-m="{{ code }}" class="{% if r.method == code %}on{% endif %}">{{ label }}</button>
+                    {% endfor %}
+                </span>
+            </td>
+        </tr>
+    {% empty %}
+        <tr><td colspan="5">Нет данных</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% include "_pagination.html" %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.seg').forEach(function (seg) {
+    seg.addEventListener('click', function (e) {
+        var btn = e.target.closest('button');
+        if (!btn) return;
+        var on = btn.classList.contains('on');
+        postJSON('/api/method/', {
+            id: seg.dataset.id,
+            method: on ? '' : btn.dataset.m
+        }).then(function (c) {
+            seg.querySelectorAll('button').forEach(function (b) { b.classList.remove('on'); });
+            if (!on) btn.classList.add('on');
+            var n = document.querySelectorAll('.dash-card-num');
+            n[0].textContent = c.method.deg;
+            n[1].textContent = c.method.uik;
+            n[2].textContent = c.method.uvz;
+            n[3].textContent = c.method.none;
+        });
+    });
+});
+</script>
+{% endblock %}

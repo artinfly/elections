@@ -1,0 +1,30 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Django: сервер",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}\\manage.py",
+            "args": [
+                "runserver"
+            ],
+            "django": true,
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Django: тесты",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}\\manage.py",
+            "args": [
+                "test",
+                "election_statistics"
+            ],
+            "django": true,
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ]
+}

@@ -1,0 +1,8 @@
+{% if page.paginator.num_pages > 1 %}
+<div class="d-flex align-items-center gap-2 mt-3">
+    {% if page.has_previous %}<a class="pgn-btn" href="?{{ query }}&page={{ page.previous_page_number }}">←</a>{% endif %}
+    <span class="pgn-btn pgn-active">{{ page.number }}</span>
+    <span class="row-count-label">из {{ page.paginator.num_pages }}</span>
+    {% if page.has_next %}<a class="pgn-btn" href="?{{ query }}&page={{ page.next_page_number }}">→</a>{% endif %}
+</div>
+{% endif %}

@@ -1,0 +1,38 @@
+{
+    "python.defaultInterpreterPath": ".venv\\Scripts\\python.exe",
+
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.black-formatter",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+        },
+        "editor.rulers": [
+            88
+        ]
+    },
+    "isort.args": [
+        "--profile",
+        "black"
+    ],
+
+    "files.associations": {
+        "**/templates/**/*.html": "django-html"
+    },
+    "emmet.includeLanguages": {
+        "django-html": "html"
+    },
+
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/*.pyc": true,
+        "staticfiles": true,
+        "wheels": true
+    },
+    "search.exclude": {
+        "**/.venv": true,
+        "**/staticfiles": true,
+        "**/wheels": true,
+        "**/static/vendor": true
+    }
+}

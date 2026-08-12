@@ -1,0 +1,22 @@
+# Прямые зависимости
+Django==6.0.2
+openpyxl==3.1.5
+psycopg2-binary==2.9.11
+whitenoise==6.12.0
+
+# Приходят вместе с ними
+asgiref==3.11.1
+et-xmlfile==2.0.0
+sqlparse==0.5.5
+tzdata==2025.3
+
+# Форматирование кода (не нужны для запуска)
+black==26.5.1
+isort==8.0.1
+click==8.4.2
+colorama==0.4.6
+mypy-extensions==1.1.0
+packaging==26.2
+pathspec==1.1.1
+platformdirs==4.10.1
+pytokens==0.4.1

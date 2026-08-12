@@ -1,0 +1,52 @@
+<div class="filter-panel mb-3">
+    <form method="get">
+        <div class="d-flex flex-wrap gap-3 align-items-end">
+            <div class="filter-group">
+                <label class="filter-label">Таб№</label>
+                <input class="filter-input" type="text" name="tab" value="{{ f.tab }}" placeholder="Поиск...">
+            </div>
+            <div class="filter-group">
+                <label class="filter-label">ФИО</label>
+                <input class="filter-input" type="text" name="fio" value="{{ f.fio }}" placeholder="Поиск...">
+            </div>
+            <div class="filter-group">
+                <label class="filter-label">Цех</label>
+                <select class="filter-select" name="dep">
+                    <option value="">Все</option>
+                    {% for d in departments %}<option value="{{ d }}" {% if d == f.dep %}selected{% endif %}>{{ d }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="filter-group">
+                <label class="filter-label">УИК</label>
+                <select class="filter-select" name="uik">
+                    <option value="">Все</option>
+                    {% for u in uiks %}<option value="{{ u }}" {% if u == f.uik %}selected{% endif %}>{{ u }}</option>{% endfor %}
+                </select>
+            </div>
+            {% if with_status %}
+            <div class="filter-group">
+                <label class="filter-label">Способ</label>
+                <select class="filter-select" name="method">
+                    <option value="">Все</option>
+                    <option value="none" {% if f.method == 'none' %}selected{% endif %}>Не назначен</option>
+                    {% for code, label in methods %}<option value="{{ code }}" {% if f.method == code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="filter-group">
+                <label class="filter-label">Явка</label>
+                <select class="filter-select" name="voted">
+                    <option value="">Все</option>
+                    <option value="yes" {% if f.voted == 'yes' %}selected{% endif %}>Проголосовал</option>
+                    <option value="no" {% if f.voted == 'no' %}selected{% endif %}>Не голосовал</option>
+                </select>
+            </div>
+            {% endif %}
+            <div class="filter-group">
+                <button class="btn-orange" type="submit">Найти</button>
+            </div>
+            <div class="filter-group">
+                <a class="btn-ghost" href="{{ request.path }}">Сбросить</a>
+            </div>
+        </div>
+    </form>
+</div>
