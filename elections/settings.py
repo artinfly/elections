@@ -86,8 +86,6 @@ USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
-# Статика.
-# STATICFILES_STORAGE удалён в Django 5.1, вместо него STORAGES.
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
@@ -100,8 +98,6 @@ STORAGES = {
     },
 }
 
-# Загружаемые xlsx целиком держим в памяти — файлы небольшие,
-# иначе openpyxl не сможет прочитать временный файл на Windows.
 FILE_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024
 
 LOGIN_URL = "/login/"
