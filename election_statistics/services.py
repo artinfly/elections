@@ -1,13 +1,15 @@
+import re
 from datetime import datetime
 
 import openpyxl
+from django.db.models import Count, F, Q
 from django.utils import timezone
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 
 from utils.archiver import ReportArchiver
 
-from .models import METHOD_LABELS, Employee
+from .models import DEG, METHOD_LABELS, UIK, UVZ, Employee
 
 BAD_FORMAT = "Ошибка, документ не соответствует формату"
 
@@ -136,10 +138,11 @@ def import_base(upload):
 
 
 def set_turnout(queryset, voted=True):
-    fields = {"voted": voted, "voted_at": timezone.now() if voted else None}
-    if not voted:
-        fields["voted_method"] = ""
-    return queryset.update(**fields)
+    return queryset.update(
+        voted=voted,
+        voted_at=timezone.now() if voted else None,
+        voted_method=F("method") if voted else "",
+    )
 
 
 def mark_voted(tabs, voted=True):
@@ -153,41 +156,68 @@ def mark_voted(tabs, voted=True):
 
 REPORT_WIDTHS = (14, 46, 10)
 
+BAD_NAME_CHARS = re.compile(r"[\\/*?:\[\]]")
 
-def department_report(department, moment=None):
+REPORT_MODES = {
+    "turnout": {
+        "title": "Информация по голосованию на",
+        "column": "Количество проголосовавших",
+        "list_title": "Список НЕ принявших участие в голосовании:",
+        "done": Q(voted=True),
+    },
+    "method": {
+        "title": "Информация по выбору способа голосования на",
+        "column": "Количество выбравших способ",
+        "list_title": "Список НЕ выбравших способ голосования:",
+        "done": ~Q(method=""),
+    },
+}
+
+
+def department_file_name(department):
+    name = department.strip()
+    if name.isdigit():
+        return f"{int(name):03d}"
+    return BAD_NAME_CHARS.sub("-", name)
+
+
+def department_report(department, moment=None, mode="turnout"):
+    rule = REPORT_MODES[mode]
     moment = moment or timezone.localtime()
     people = Employee.objects.filter(department=department)
     total = people.count()
-    voted = people.filter(voted=True).count()
+    done = people.filter(rule["done"]).count()
 
     book = openpyxl.Workbook()
     sheet = book.active
-    sheet.title = f"Цех {department}"[:31]
+    sheet.title = BAD_NAME_CHARS.sub("-", f"Цех {department}")[:31]
     for index, width in enumerate(REPORT_WIDTHS, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
 
     bold = Font(bold=True)
-    title = sheet.cell(1, 1, f"Информация по голосованию на {moment:%d.%m.%y %H:%M}")
+    title = sheet.cell(1, 1, f"{rule['title']} {moment:%d.%m.%y %H:%M}")
     title.font = Font(bold=True, size=12)
     sheet.cell(2, 1, f"Цех {department}").font = bold
 
     for column, name in enumerate(
-        ("Общее количество голосующих", "Количество проголосовавших", "Процент"), 1
+        ("Общее количество голосующих", rule["column"], "Процент"), 1
     ):
         cell = sheet.cell(4, column, name)
         cell.font = bold
         cell.alignment = Alignment(horizontal="center", wrap_text=True)
 
     sheet.cell(5, 1, total).alignment = Alignment(horizontal="center")
-    sheet.cell(5, 2, voted).alignment = Alignment(horizontal="center")
-    share = sheet.cell(5, 3, (voted / total) if total else 0)
+    sheet.cell(5, 2, done).alignment = Alignment(horizontal="center")
+    share = sheet.cell(5, 3, (done / total) if total else 0)
     share.number_format = "0.00%"
     share.alignment = Alignment(horizontal="center")
 
-    sheet.cell(7, 1, "Список НЕ принявших участие в голосовании:").font = bold
+    sheet.cell(7, 1, rule["list_title"]).font = bold
 
     row = 8
-    for person in people.filter(voted=False).order_by("surname", "name", "patronymic"):
+    for person in people.exclude(rule["done"]).order_by(
+        "surname", "name", "patronymic"
+    ):
         sheet.cell(row, 1, person.tab_number)
         sheet.cell(row, 2, person.fio)
         sheet.cell(row, 3, 1).alignment = Alignment(horizontal="center")
@@ -196,20 +226,103 @@ def department_report(department, moment=None):
     return book
 
 
-def reports_archive(moment=None):
+def reports_archive(moment=None, mode="turnout"):
     moment = moment or timezone.localtime()
     departments = (
         Employee.objects.exclude(department="")
         .values_list("department", flat=True)
         .distinct()
-        .order_by("department")
+        .order_by()
     )
     archiver = ReportArchiver()
-    for department in departments:
+    for department in sorted(departments, key=_by_number):
         archiver.add_workbook(
-            department_report(department, moment), f"{department}.xlsx"
+            department_report(department, moment, mode),
+            f"{department_file_name(department)}.xlsx",
         )
     return archiver
+
+
+SUMMARY_WIDTHS = (18, 16, 10, 10, 12, 16, 10)
+
+
+def _by_number(value):
+    name = (value or "").strip()
+    return (0, int(name), "") if name.isdigit() else (1, 0, name)
+
+
+def summary_table(group_field="department", group_title="Подразделение"):
+    rows = sorted(
+        Employee.objects.exclude(**{group_field: ""})
+        .values(group_field)
+        .annotate(
+            people=Count("id"),
+            plan_deg=Count("id", filter=Q(method=DEG)),
+            plan_uik=Count("id", filter=Q(method=UIK)),
+            plan_uvz=Count("id", filter=Q(method=UVZ)),
+            came=Count("id", filter=Q(voted=True)),
+        )
+        .order_by(),
+        key=lambda row: _by_number(row[group_field]),
+    )
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "Сводка"
+    for index, width in enumerate(SUMMARY_WIDTHS, 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+
+    bold = Font(bold=True)
+    centered = Alignment(horizontal="center", wrap_text=True)
+    headers = (
+        group_title,
+        "Количество людей",
+        "ДЭГ",
+        "УИК",
+        "УИК-УВЗ",
+        "Проголосовавшие",
+        "Процент",
+    )
+    for column, name in enumerate(headers, 1):
+        cell = sheet.cell(1, column, name)
+        cell.font = bold
+        cell.alignment = centered
+
+    totals = dict.fromkeys(("people", "plan_deg", "plan_uik", "plan_uvz", "came"), 0)
+    line = 2
+    for row in rows:
+        values = (
+            row["people"],
+            row["plan_deg"],
+            row["plan_uik"],
+            row["plan_uvz"],
+            row["came"],
+        )
+        sheet.cell(line, 1, row[group_field])
+        for shift, value in enumerate(values, 2):
+            sheet.cell(line, shift, value).alignment = Alignment(horizontal="center")
+        share = sheet.cell(line, 7, row["came"] / row["people"] if row["people"] else 0)
+        share.number_format = "0.00%"
+        share.alignment = Alignment(horizontal="center")
+        for key in totals:
+            totals[key] += row[key]
+        line += 1
+
+    sheet.cell(line, 1, "Итого").font = bold
+    for shift, key in enumerate(
+        ("people", "plan_deg", "plan_uik", "plan_uvz", "came"), 2
+    ):
+        cell = sheet.cell(line, shift, totals[key])
+        cell.font = bold
+        cell.alignment = Alignment(horizontal="center")
+    share = sheet.cell(
+        line, 7, totals["came"] / totals["people"] if totals["people"] else 0
+    )
+    share.font = bold
+    share.number_format = "0.00%"
+    share.alignment = Alignment(horizontal="center")
+
+    return book
 
 
 def export_xlsx():

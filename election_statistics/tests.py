@@ -2,11 +2,17 @@ import io
 import zipfile
 from pathlib import Path
 
+import openpyxl
 from django.contrib.auth.models import Group, User
 from django.test import TestCase
 
 from .models import DEG, UVZ, Employee
-from .services import department_report, import_base
+from .services import (
+    department_file_name,
+    department_report,
+    import_base,
+    summary_table,
+)
 
 TEMPLATE = Path(r"C:\Users\smiar\Desktop\excel\Книга1.xlsx")
 
@@ -96,29 +102,53 @@ class VotedApiTests(TestCase):
     def _post(self, payload):
         return self.client.post("/api/voted/", payload, content_type="application/json")
 
-    def test_marks_turnout_without_place(self):
+    def test_place_is_taken_from_the_plan(self):
+        Employee.objects.filter(pk=self.person.pk).update(method=UVZ)
+        self._post({"id": self.person.pk, "voted": True})
+        self.person.refresh_from_db()
+        self.assertTrue(self.person.voted)
+        self.assertEqual(self.person.voted_method, UVZ)
+        self.assertEqual(self.person.method, UVZ)
+
+    def test_without_a_plan_the_place_stays_empty(self):
         self._post({"id": self.person.pk, "voted": True})
         self.person.refresh_from_db()
         self.assertTrue(self.person.voted)
         self.assertEqual(self.person.voted_method, "")
 
-    def test_place_does_not_touch_the_plan(self):
+    def test_place_is_not_taken_from_the_request(self):
         Employee.objects.filter(pk=self.person.pk).update(method=UVZ)
         self._post({"id": self.person.pk, "voted": True, "method": DEG})
         self.person.refresh_from_db()
-        self.assertTrue(self.person.voted)
-        self.assertEqual(self.person.voted_method, DEG)
-        self.assertEqual(self.person.method, UVZ)
+        self.assertEqual(self.person.voted_method, UVZ)
 
     def test_turnout_removal_clears_the_place(self):
-        self._post({"id": self.person.pk, "voted": True, "method": DEG})
-        self._post({"id": self.person.pk, "voted": False, "method": DEG})
+        Employee.objects.filter(pk=self.person.pk).update(method=DEG)
+        self._post({"id": self.person.pk, "voted": True})
+        self._post({"id": self.person.pk, "voted": False})
         self.person.refresh_from_db()
         self.assertFalse(self.person.voted)
         self.assertEqual(self.person.voted_method, "")
+        self.assertEqual(self.person.method, DEG)
+
+    def test_bulk_marking_fills_places_from_plans(self):
+        Employee.objects.filter(pk=self.person.pk).update(method=DEG)
+        other = Employee.objects.create(
+            tab_number="002", department="97", surname="Второй", name="В", method=UVZ
+        )
+        self.client.post(
+            "/api/bulk-voted/",
+            {"voted": True, "filters": {}},
+            content_type="application/json",
+        )
+        self.person.refresh_from_db()
+        other.refresh_from_db()
+        self.assertEqual(self.person.voted_method, DEG)
+        self.assertEqual(other.voted_method, UVZ)
 
     def test_bulk_removal_clears_the_place(self):
-        self._post({"id": self.person.pk, "voted": True, "method": DEG})
+        Employee.objects.filter(pk=self.person.pk).update(method=DEG)
+        self._post({"id": self.person.pk, "voted": True})
         self.client.post(
             "/api/bulk-voted/",
             {"voted": False, "filters": {}},
@@ -130,11 +160,6 @@ class VotedApiTests(TestCase):
 
     def test_unknown_id_answers_404(self):
         self.assertEqual(self._post({"id": 10**9, "voted": True}).status_code, 404)
-
-    def test_unknown_place_is_not_stored(self):
-        self._post({"id": self.person.pk, "voted": True, "method": "xyz"})
-        self.person.refresh_from_db()
-        self.assertEqual(self.person.voted_method, "")
 
     def test_unknown_plan_is_not_stored(self):
         self.client.post(
@@ -219,6 +244,88 @@ class ReportTests(TestCase):
     def test_report_without_people_gives_zero_percent(self):
         Employee.objects.filter(department="001").delete()
         self.assertEqual(department_report("001").active.cell(5, 3).value, 0)
+
+
+class SummaryTests(TestCase):
+    def setUp(self):
+        self.client.force_login(User.objects.create_user("u", password="x"))
+        Employee.objects.create(
+            tab_number="a",
+            department="7",
+            surname="А",
+            name="И",
+            method=DEG,
+            voted=True,
+        )
+        Employee.objects.create(
+            tab_number="b", department="7", surname="Б", name="И", method=UVZ
+        )
+        Employee.objects.create(
+            tab_number="c", department="130", surname="В", name="И", voted=True
+        )
+        Employee.objects.create(tab_number="d", department="97", surname="Г", name="И")
+
+    def test_rows_sorted_as_numbers(self):
+        sheet = summary_table().active
+        names = [sheet.cell(r, 1).value for r in range(2, sheet.max_row)]
+        self.assertEqual(names, ["7", "97", "130"])
+
+    def test_counts_and_total(self):
+        sheet = summary_table().active
+        first = [sheet.cell(2, c).value for c in range(1, 7)]
+        self.assertEqual(first, ["7", 2, 1, 0, 1, 1])
+        self.assertAlmostEqual(sheet.cell(2, 7).value, 0.5)
+        self.assertEqual(sheet.cell(2, 7).number_format, "0.00%")
+
+        last = sheet.max_row
+        self.assertEqual(sheet.cell(last, 1).value, "Итого")
+        self.assertEqual(
+            [sheet.cell(last, c).value for c in range(2, 7)], [4, 1, 0, 1, 2]
+        )
+        self.assertAlmostEqual(sheet.cell(last, 7).value, 0.5)
+
+    def test_grouping_field_is_a_parameter(self):
+        sheet = summary_table(group_field="uik", group_title="УИК").active
+        self.assertEqual(sheet.cell(1, 1).value, "УИК")
+
+    def test_download(self):
+        self.assertEqual(self.client.get("/export/summary/").status_code, 200)
+
+
+class ArchiveModeTests(TestCase):
+    def setUp(self):
+        self.client.force_login(User.objects.create_user("u", password="x"))
+        Employee.objects.create(
+            tab_number="a",
+            department="7",
+            surname="А",
+            name="И",
+            method=DEG,
+            voted=True,
+        )
+        Employee.objects.create(tab_number="b", department="7", surname="Б", name="И")
+
+    def _sheet(self, url):
+        z = zipfile.ZipFile(io.BytesIO(self.client.get(url).content))
+        self.assertEqual(z.namelist(), ["007.xlsx"])
+        return openpyxl.load_workbook(io.BytesIO(z.read("007.xlsx"))).active
+
+    def test_turnout_archive(self):
+        sheet = self._sheet("/export/archive/")
+        self.assertIn("голосованию", sheet.cell(1, 1).value)
+        self.assertEqual(sheet.cell(4, 2).value, "Количество проголосовавших")
+        self.assertEqual(sheet.cell(5, 2).value, 1)
+
+    def test_method_archive(self):
+        sheet = self._sheet("/export/archive-methods/")
+        self.assertIn("способа", sheet.cell(1, 1).value)
+        self.assertEqual(sheet.cell(4, 2).value, "Количество выбравших способ")
+        self.assertEqual(sheet.cell(5, 2).value, 1)
+
+    def test_department_number_is_padded(self):
+        self.assertEqual(department_file_name("7"), "007")
+        self.assertEqual(department_file_name("130"), "130")
+        self.assertEqual(department_file_name("цех/1"), "цех-1")
 
 
 class UikStatsTests(TestCase):

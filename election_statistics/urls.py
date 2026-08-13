@@ -11,7 +11,13 @@ urlpatterns = [
     path("upload/base/", views.upload_base, name="upload_base"),
     path("export/", views.export_page, name="export"),
     path("export/employees/", views.export_employees, name="export_employees"),
+    path("export/summary/", views.export_summary, name="export_summary"),
     path("export/archive/", views.export_archive, name="export_archive"),
+    path(
+        "export/archive-methods/",
+        views.export_method_archive,
+        name="export_method_archive",
+    ),
     path("api/method/", views.api_method, name="api_method"),
     path("api/voted/", views.api_voted, name="api_voted"),
     path("api/bulk-voted/", views.api_bulk_voted, name="api_bulk_voted"),

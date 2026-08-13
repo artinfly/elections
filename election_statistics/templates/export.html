@@ -13,15 +13,45 @@
         <div class="export-text">
             <div class="block-title">Отчёты по цехам</div>
             <div class="hint">
-                Zip-архив, внутри отдельный файл на каждый цех. Имя файла — номер цеха.
-                В файле: сколько всего голосующих, сколько проголосовало, процент явки
-                и список тех, кто не проголосовал.
+                Zip-архив, внутри отдельный файл на каждый цех. Имя файла — номер цеха 
+                из трёх цифр. В файле: сколько всего голосующих, сколько проголосовало, 
+                процент явки и список тех, кто не проголосовал.
             </div>
         </div>
         <div class="export-side">
             <div class="export-num">{{ departments|length }}</div>
             <div class="export-unit">цехов</div>
             <a class="btn-orange" href="{% url 'export_archive' %}">Скачать</a>
+        </div>
+    </div>
+
+    <div class="card-block export-row">
+        <div class="export-text">
+            <div class="block-title">Отчёты по цехам: выбор способа</div>
+            <div class="hint">
+                Такой же архив по цехам, но считается не явка , а сколько человек
+                выбрали способ голосования. В файле список тех, у кого способ ещё 
+                не выбран.
+            </div>
+        </div>
+        <div class="export-side">
+            <div class="export-num">{{ departments|length }}</div>
+            <div class="export-unit">цехов</div>
+            <a class="btn-orange" href="{% url 'export_method_archive' %}">Скачать</a>
+        </div>
+    </div>
+    <div class="card-block export-row">
+        <div class="export-text">
+            <div class="block-title">Сводная таблица по цехам</div>
+            <div class="hint">
+                Один файл, строка на цех: сколько людей, сколько выбрали ДЭГ, УИК и
+                УИК-УВЗ, сколько проголосовало и процент явки. Внизу строка «Итого».
+            </div>
+        </div>
+        <div class="export-side">
+            <div class="export-num">{{ departments|length }}</div>
+            <div class="export-unit">строк</div>
+            <a class="btn-orange" href="{% url 'export_summary' %}">Скачать</a>
         </div>
     </div>
 

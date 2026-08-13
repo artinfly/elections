@@ -17,6 +17,7 @@ from .services import (
     mark_voted,
     reports_archive,
     set_turnout,
+    summary_table,
 )
 
 PER_PAGE = 100
@@ -198,13 +199,7 @@ def api_voted(request):
     if person is None:
         return JsonResponse({"error": "работник не найден"}, status=404)
 
-    voted = bool(data.get("voted"))
-    where = data.get("method")
-    if where is not None:
-        Employee.objects.filter(pk=person.pk).update(
-            voted_method=_known_method(where) if voted else ""
-        )
-    mark_voted([person.tab_number], voted=voted)
+    mark_voted([person.tab_number], voted=bool(data.get("voted")))
     return JsonResponse(_counts(_filtered(data.get("filters") or {})))
 
 
@@ -254,6 +249,18 @@ def export_page(request):
 
 
 @login_required
+def export_summary(request):
+    book = summary_table()
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    name = f"svodka_po_ceham_{timezone.localtime():%Y%m%d_%H%M}.xlsx"
+    response["Content-Disposition"] = f'attachment; filename="{name}"'
+    book.save(response)
+    return response
+
+
+@login_required
 def export_employees(request):
     book = export_xlsx()
     response = HttpResponse(
@@ -264,14 +271,23 @@ def export_employees(request):
     return response
 
 
-@login_required
-def export_archive(request):
+def _archive_response(request, mode, prefix):
     moment = timezone.localtime()
-    archiver = reports_archive(moment)
+    archiver = reports_archive(moment, mode)
     if not archiver.file_count:
         request.session["msg"] = "Нет ни одного отдела — архив пустой"
         return redirect("export")
     response = HttpResponse(archiver.build_bytes(), content_type="application/zip")
-    name = f"otchety_po_cehams_{moment:%Y%m%d_%H%M}.zip"
+    name = f"{prefix}_po_ceham_{moment:%Y%m%d_%H%M}.zip"
     response["Content-Disposition"] = f'attachment; filename="{name}"'
     return response
+
+
+@login_required
+def export_archive(request):
+    return _archive_response(request, "turnout", "yavka")
+
+
+@login_required
+def export_method_archive(request):
+    return _archive_response(request, "method", "sposob")
