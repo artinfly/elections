@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Выгрузка{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h5>Выгрузка</h5>
+    <span class="row-count-label">в базе работников: {{ counts.method.total }}</span>
+</div>
+
+{% if msg %}<div class="err-msg mb-3">{{ msg }}</div>{% endif %}
+
+<div class="narrow">
+    <div class="card-block export-row">
+        <div class="export-text">
+            <div class="block-title">Отчёты по цехам</div>
+            <div class="hint">
+                Zip-архив, внутри отдельный файл на каждый цех. Имя файла — номер цеха.
+                В файле: сколько всего голосующих, сколько проголосовало, процент явки
+                и список тех, кто не проголосовал.
+            </div>
+        </div>
+        <div class="export-side">
+            <div class="export-num">{{ departments|length }}</div>
+            <div class="export-unit">цехов</div>
+            <a class="btn-orange" href="{% url 'export_archive' %}">Скачать</a>
+        </div>
+    </div>
+
+    <div class="card-block export-row">
+        <div class="export-text">
+            <div class="block-title">Полная таблица</div>
+            <div class="hint">
+                Один файл со всеми работниками: колонки из загрузки плюс способ
+                голосования, отметка явки и место, где человек проголосовал.
+            </div>
+        </div>
+        <div class="export-side">
+            <div class="export-num">{{ counts.method.total }}</div>
+            <div class="export-unit">строк</div>
+            <a class="btn-ghost" href="{% url 'export_employees' %}">Скачать</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

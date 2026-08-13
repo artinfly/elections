@@ -3,41 +3,73 @@
 {% block content %}
 <div class="page-header">
     <h5>Загрузка данных</h5>
-    <span class="row-count-label">в базе: {{ counts.method.total }}</span>
+    <span class="row-count-label">в базе работников: {{ counts.method.total }}</span>
 </div>
 
 {% if msg %}<div class="ok-msg mb-3">{{ msg }}</div>{% endif %}
 
-<div class="d-flex flex-wrap gap-3 align-items-start">
-    <div class="card-block" style="flex:1 1 320px;max-width:420px">
-        <div class="block-title">База сотрудников</div>
-        <form method="post" action="{% url 'upload_base' %}" enctype="multipart/form-data">
+<div class="narrow">
+    <div class="card-block">
+        <form method="post" action="{% url 'upload_base' %}" enctype="multipart/form-data"
+              onsubmit="return checkFile()">
             {% csrf_token %}
-            <input class="form-control form-control-sm" type="file" name="file" accept=".xlsx" required>
-            <div class="hint">Колонки «№ п/п» и «CARD_ID» не загружаются. Повторная загрузка обновляет по Таб№ и не стирает способ и явку.</div>
-            <button class="btn-orange mt-3" type="submit">Загрузить</button>
+            <div class="file-row">
+                <input type="file" name="file" accept=".xlsx" class="form-control form-control-sm">
+                <button class="btn-orange" type="submit" id="upload-btn">Загрузить</button>
+            </div>
+            <div class="fmt-line">
+                <span class="fmt-badge">XLSX</span>
+                <span>
+                    Принимается только этот формат. Старый <b>.xls</b> не читается —
+                    откройте его в Excel и сохраните заново через
+                    «Сохранить как → Книга Excel (*.xlsx)».
+                </span>
+            </div>
+            <div id="upload-progress" class="hint" style="display:none">
+                Идёт разбор файла, подождите...
+            </div>
+            <div id="file-error" class="err-msg mt-2" style="display:none"></div>
         </form>
     </div>
 
-    <div class="card-block" style="flex:1 1 320px;max-width:420px">
-        <div class="block-title">Способы голосования</div>
-        <form method="post" action="{% url 'upload_methods' %}" enctype="multipart/form-data">
-            {% csrf_token %}
-            <input class="form-control form-control-sm" type="file" name="file" accept=".xlsx" required>
-            <div class="hint">Нужны колонки «Таб№» и «Способ».</div>
-            <button class="btn-orange mt-3" type="submit">Загрузить</button>
-        </form>
-    </div>
-
-    <div class="card-block" style="flex:1 1 320px;max-width:420px">
-        <div class="block-title">Проголосовавшие</div>
-        <form method="post" action="{% url 'upload_voted' %}" enctype="multipart/form-data">
-            {% csrf_token %}
-            <input class="form-control form-control-sm" type="file" name="file" accept=".xlsx">
-            <div class="hint">Файл с колонкой «Таб№» либо список табельных номеров через пробел или запятую.</div>
-            <textarea class="form-control form-control-sm" name="tabs" placeholder="0848103 0701551 0969490"></textarea>
-            <button class="btn-orange mt-3" type="submit">Отметить</button>
-        </form>
+    <div class="card-block">
+        <div class="block-title">Колонки файла</div>
+        <div class="chip-grid">
+            {% for name in columns %}<span class="chip">{{ name }}</span>{% endfor %}
+        </div>
+        <div class="hint">
+            Порядок колонок не важен, «№ п/п» и «CARD_ID» не загружаются.
+            Ключ — «Таб№»: повторная загрузка обновляет данные работника и не стирает
+            проставленные способ голосования и явку.
+        </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function checkFile() {
+    var input = document.querySelector('input[name="file"]');
+    var err = document.getElementById('file-error');
+    function fail(text) {
+        err.textContent = text;
+        err.style.display = 'block';
+        return false;
+    }
+    if (!input.files || !input.files.length) {
+        return fail('Файл не прикреплён — выберите .xlsx перед загрузкой');
+    }
+    var name = input.files[0].name;
+    if (!name.toLowerCase().endsWith('.xlsx')) {
+        var ext = name.indexOf('.') >= 0 ? name.slice(name.lastIndexOf('.')) : 'без расширения';
+        return fail('Это ' + ext + ', а нужен .xlsx — пересохраните файл в Excel');
+    }
+    err.style.display = 'none';
+    var btn = document.getElementById('upload-btn');
+    btn.disabled = true;
+    btn.textContent = 'Загрузка...';
+    document.getElementById('upload-progress').style.display = 'block';
+    return true;
+}
+</script>
 {% endblock %}
