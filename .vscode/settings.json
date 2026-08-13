@@ -1,6 +1,5 @@
 {
     "python.defaultInterpreterPath": ".venv\\Scripts\\python.exe",
-
     "[python]": {
         "editor.defaultFormatter": "ms-python.black-formatter",
         "editor.formatOnSave": true,
@@ -15,14 +14,12 @@
         "--profile",
         "black"
     ],
-
     "files.associations": {
         "**/templates/**/*.html": "django-html"
     },
     "emmet.includeLanguages": {
         "django-html": "html"
     },
-
     "files.exclude": {
         "**/__pycache__": true,
         "**/*.pyc": true,
@@ -33,6 +30,19 @@
         "**/.venv": true,
         "**/staticfiles": true,
         "**/wheels": true,
-        "**/static/vendor": true
+        "**/static/vendor": true,
+        "**/migrations": true
+    },
+    "[html]": {
+        "editor.tabSize": 4
+    },
+    "[django-html]": {
+        "editor.tabSize": 4
+    },
+    "[css]": {
+        "editor.tabSize": 4
+    },
+    "[javascript]": {
+        "editor.tabSize": 4
     }
 }
