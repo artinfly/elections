@@ -14,17 +14,17 @@
     color: #fff; font-weight: 600;
 }
 
-.seg-turnout button {
-    border-radius: 14px; border-width: 2px; border-style: dashed;
-}
-.seg-turnout button:hover { border-color: #2563eb; color: #2563eb; }
-.seg-turnout button.on {
-    background: rgba(37, 99, 235, .12); border-color: #2563eb;
-    border-style: solid; color: #2563eb; font-weight: 600;
-}
-
 .report-table .col-method { width: 300px; }
-.report-table .col-turnout { width: 270px; }
+.place-badge {
+    display: inline-block;
+    border: 2px dashed #2563eb; border-radius: 14px;
+    padding: .18rem .8rem; font-size: .75rem; font-weight: 600;
+    color: #2563eb; background: rgba(37, 99, 235, .08);
+    white-space: nowrap;
+}
+.place-badge[hidden] { display: none; }
+
+.report-table .col-turnout { width: 170px; }
 .report-table .col-turnout-simple { width: 130px; }
 .report-table td.col-turnout { border-left: 2px solid var(--border); }
 .report-table th.col-turnout { border-left: 2px solid #555; }

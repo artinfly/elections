@@ -47,6 +47,7 @@
 
     var body = document.getElementById("uik-modal-body");
     var sub = document.getElementById("uik-modal-sub");
+    var withTurnout = card.dataset.turnout === "1";
 
     function close() {
         modal.hidden = true;
@@ -60,6 +61,7 @@
     function render(rows) {
         if (!rows.length) {
             body.innerHTML = '<div class="modal-empty">Нет данных</div>';
+            sub.textContent = "";
             return;
         }
         var people = 0;
@@ -68,19 +70,25 @@
             people += r.people;
             came += r.came;
             var share = r.people ? Math.round((r.came / r.people) * 100) : 0;
-            return "<tr><td>" + (r.uik ? escape(r.uik) : "<i>не указан</i>") +
-                "</td><td>" + r.people +
-                "</td><td>" + r.came +
-                "</td><td>" + share + "%</td></tr>";
+            var row = "<tr><td>" + (r.uik ? escape(r.uik) : "<i>не указан</i>") +
+                "</td><td>" + r.people + "</td>";
+            if (withTurnout) {
+                row += "<td>" + r.came + "</td><td>" + share + "%</td>";
+            }
+            return row + "</tr>";
         }).join("");
-        var total = people ? Math.round((came / people) * 100) : 0;
-        body.innerHTML =
-            '<table class="modal-table"><thead><tr>' +
-            "<th>УИК</th><th>Человек</th><th>Проголосовало</th><th>Явка</th>" +
-            "</tr></thead><tbody>" + cells +
-            '<tr class="modal-total"><td>Итого</td><td>' + people +
-            "</td><td>" + came + "</td><td>" + total + "%</td></tr>" +
-            "</tbody></table>";
+
+        var head = "<th>УИК</th><th>Человек</th>";
+        var foot = '<tr class="modal-total"><td>Итого</td><td>' + people + "</td>";
+        if (withTurnout) {
+            head += "<th>Проголосовало</th><th>Явка</th>";
+            foot += "<td>" + came + "</td><td>" +
+                (people ? Math.round((came / people) * 100) : 0) + "%</td>";
+        }
+        foot += "</tr>";
+
+        body.innerHTML = '<table class="modal-table"><thead><tr>' + head +
+            "</tr></thead><tbody>" + cells + foot + "</tbody></table>";
         sub.textContent = "участков: " + rows.length + ", человек: " + people;
     }
 

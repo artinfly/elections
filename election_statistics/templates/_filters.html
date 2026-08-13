@@ -19,14 +19,16 @@
                     {% for u in uiks %}<option value="{{ u }}" {% if u == f.uik %}selected{% endif %}>{{ u }}</option>{% endfor %}
                 </select>
             </div>
+            {% if not with_status %}
             <div class="filter-group">
-                <label class="filter-label">{% if with_status %}Планировал{% else %}Способ{% endif %}</label>
+                <label class="filter-label">Способ</label>
                 <select class="filter-select" name="method">
                     <option value="">Все</option>
                     <option value="none" {% if f.method == 'none' %}selected{% endif %}>Не назначен</option>
                     {% for code, label in methods %}<option value="{{ code }}" {% if f.method == code %}selected{% endif %}>{{ label }}</option>{% endfor %}
                 </select>
             </div>
+            {% endif %}
             {% if with_status %}
             <div class="filter-group">
                 <label class="filter-label">Явка</label>

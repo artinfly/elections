@@ -14,7 +14,7 @@
         </div>
     </div>
     <div>
-        <button type="button" class="dash-card dash-card-action" id="uik-card"
+        <button type="button" class="dash-card dash-card-action" id="uik-card" data-turnout="1"
                 title="Показать распределение по участкам">
             <div class="dash-card-icon" style="background:rgba(42,120,214,.12);color:#2a78d6">У</div>
             <div><div class="dash-card-num">{{ counts.voted.uik }}</div><div class="dash-card-lbl">УИК<span class="dash-card-more">по участкам</span></div></div>
@@ -55,7 +55,6 @@
 <table class="report-table">
     <thead><tr>
         <th>Цех</th><th>Таб№</th><th>ФИО</th><th>УИК</th>
-        <th>Планировал</th>
         <th class="col-turnout-simple">Явка</th>
         <th class="col-turnout">Где голосовал</th>
     </tr></thead>
@@ -66,22 +65,18 @@
             <td>{{ r.tab_number }}</td>
             <td class="wrap">{{ r.fio }}</td>
             <td>{{ r.uik }}</td>
-            <td class="cell-plan">{{ r.method_label }}</td>
             <td class="col-turnout-simple">
-                <button type="button" class="vote-btn {% if r.voted %}on{% endif %}" data-id="{{ r.id }}">
+                <button type="button" class="vote-btn {% if r.voted %}on{% endif %}"
+                        data-id="{{ r.id }}" data-plan="{{ r.method_label }}">
                     {% if r.voted %}Проголосовал{% else %}Не голосовал{% endif %}
                 </button>
             </td>
             <td class="col-turnout">
-                <span class="seg seg-turnout" data-id="{{ r.id }}">
-                    {% for code, label in methods %}
-                    <button type="button" data-m="{{ code }}" class="{% if r.voted and r.voted_method == code %}on{% endif %}">{{ label }}</button>
-                    {% endfor %}
-                </span>
+                <span class="place-badge"{% if not r.voted_method %} hidden{% endif %}>{{ r.voted_method_label }}</span>
             </td>
         </tr>
     {% empty %}
-        <tr><td colspan="7">Нет данных</td></tr>
+        <tr><td colspan="6">Нет данных</td></tr>
     {% endfor %}
     </tbody>
 </table>
@@ -99,19 +94,13 @@ function setCounts(c) {
     n[3].textContent = c.voted.total;
     n[4].textContent = c.no_uik;
 }
-function paint(row, voted, where) {
-    var simple = row.querySelector('.vote-btn');
-    simple.classList.toggle('on', voted);
-    simple.textContent = voted ? 'Проголосовал' : 'Не голосовал';
-
-    row.querySelectorAll('.seg-turnout button').forEach(function (b) {
-        b.classList.toggle('on', voted && b.dataset.m === where);
-    });
-}
-
-function currentMethod(row) {
-    var on = row.querySelector('.seg-turnout button.on');
-    return on ? on.dataset.m : '';
+function paint(row, voted) {
+    var btn = row.querySelector('.vote-btn');
+    btn.classList.toggle('on', voted);
+    btn.textContent = voted ? 'Проголосовал' : 'Не голосовал';
+    var place = row.querySelector('.place-badge');
+    place.textContent = voted ? btn.dataset.plan : '';
+    place.hidden = !place.textContent;
 }
 
 document.querySelectorAll('.vote-btn').forEach(function (btn) {
@@ -119,25 +108,7 @@ document.querySelectorAll('.vote-btn').forEach(function (btn) {
         var row = btn.closest('tr');
         var voted = !btn.classList.contains('on');
         postJSON('/api/voted/', {id: btn.dataset.id, voted: voted}).then(function (c) {
-            paint(row, voted, currentMethod(row));
-            setCounts(c);
-        });
-    });
-});
-
-document.querySelectorAll('.seg-turnout').forEach(function (seg) {
-    seg.addEventListener('click', function (e) {
-        var btn = e.target.closest('button');
-        if (!btn) return;
-        var wasOn = btn.classList.contains('on');
-        var voted = !wasOn;
-        var method = wasOn ? currentMethod(seg.closest('tr')) : btn.dataset.m;
-        postJSON('/api/voted/', {
-            id: seg.dataset.id,
-            voted: voted,
-            method: method
-        }).then(function (c) {
-            paint(seg.closest('tr'), voted, method);
+            paint(row, voted);
             setCounts(c);
         });
     });
@@ -150,7 +121,7 @@ function bulk(voted) {
         msg.textContent = 'Изменено записей: ' + c.changed;
         msg.style.display = 'block';
         document.querySelectorAll('.report-table tbody tr').forEach(function (row) {
-            if (row.querySelector('.vote-btn')) paint(row, voted, currentMethod(row));
+            if (row.querySelector('.vote-btn')) paint(row, voted);
         });
     });
 }
