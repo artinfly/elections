@@ -28,6 +28,9 @@ class Employee(models.Model):
         "Способ голосования", max_length=3, choices=METHODS, blank=True, db_index=True
     )
     voted = models.BooleanField("Проголосовал", default=False, db_index=True)
+    voted_method = models.CharField(
+        "Где проголосовал", max_length=3, choices=METHODS, blank=True, db_index=True
+    )
     voted_at = models.DateTimeField("Время отметки", null=True, blank=True)
 
     class Meta:
@@ -42,6 +45,10 @@ class Employee(models.Model):
     @property
     def method_label(self):
         return METHOD_LABELS.get(self.method, "")
+
+    @property
+    def voted_method_label(self):
+        return METHOD_LABELS.get(self.voted_method, "")
 
     def __str__(self):
         return f"{self.tab_number} {self.fio}"
