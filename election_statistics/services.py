@@ -2,8 +2,12 @@ from datetime import datetime
 
 import openpyxl
 from django.utils import timezone
+from openpyxl.styles import Alignment, Font
+from openpyxl.utils import get_column_letter
 
-from .models import DEG, METHOD_LABELS, UIK, UVZ, Employee
+from utils.archiver import ReportArchiver
+
+from .models import METHOD_LABELS, Employee
 
 BAD_FORMAT = "Ошибка, документ не соответствует формату"
 
@@ -72,13 +76,11 @@ def _header(rows, wanted):
     raise ValueError(BAD_FORMAT)
 
 
-def import_base(upload):
-    rows = _open(upload)
-    positions = _header(rows, COLUMNS)
-    if "Таб№" not in positions:
-        raise ValueError(BAD_FORMAT)
+BATCH = 500
 
-    created = updated = 0
+
+def _rows_by_tab(rows, positions):
+    parsed = {}
     for row in rows:
         if not any(row):
             continue
@@ -88,57 +90,56 @@ def import_base(upload):
             cell = row[index] if index < len(row) else None
             values[field] = _date(cell) if field == "birth_date" else _text(cell)
         tab = values.pop("tab_number")
-        if not tab:
-            continue
-        _, is_new = Employee.objects.update_or_create(tab_number=tab, defaults=values)
-        created += is_new
-        updated += not is_new
-    return created, updated
+        if tab:
+            parsed[tab] = values
+    return parsed
 
 
-def norm_method(value):
-    text = _text(value).upper().replace(" ", "").replace("-", "")
-    if not text:
-        return ""
-    if "ДЭГ" in text or "ДЕГ" in text:
-        return DEG
-    if "УВЗ" in text:
-        return UVZ
-    if "УИК" in text:
-        return UIK
-    return ""
+def _known_rows(tabs, fields):
+    known = {}
+    tabs = list(tabs)
+    for start in range(0, len(tabs), 2000):
+        chunk = tabs[start : start + 2000]
+        for row in Employee.objects.filter(tab_number__in=chunk).values(
+            "pk", "tab_number", *fields
+        ):
+            known[row.pop("tab_number")] = row
+    return known
 
 
-def import_methods(upload):
+def import_base(upload):
     rows = _open(upload)
-    positions = _header(rows, ["Таб№", "Способ"])
-    if len(positions) < 2:
+    positions = _header(rows, COLUMNS)
+    if "Таб№" not in positions:
         raise ValueError(BAD_FORMAT)
 
-    changed = skipped = 0
-    for row in rows:
-        if not any(row):
-            continue
-        tab = _text(row[positions["Таб№"]])
-        method = norm_method(row[positions["Способ"]])
-        if not tab or not method:
-            skipped += 1
-            continue
-        updated = Employee.objects.filter(tab_number=tab).update(method=method)
-        changed += updated
-        skipped += not updated
-    return changed, skipped
+    parsed = _rows_by_tab(rows, positions)
+    if not parsed:
+        return 0, 0, 0
+
+    fields = [COLUMNS[name] for name in positions if COLUMNS[name] != "tab_number"]
+    known = _known_rows(parsed, fields)
+
+    fresh, stale = [], []
+    for tab, values in parsed.items():
+        current = known.get(tab)
+        if current is None:
+            fresh.append(Employee(tab_number=tab, **values))
+        elif any(current[field] != values[field] for field in fields):
+            stale.append(Employee(pk=current["pk"], tab_number=tab, **values))
+
+    if fresh:
+        Employee.objects.bulk_create(fresh, batch_size=BATCH)
+    if stale:
+        Employee.objects.bulk_update(stale, fields, batch_size=BATCH)
+    return len(fresh), len(stale), len(parsed)
 
 
-def read_tab_column(upload):
-    rows = _open(upload)
-    index = _header(rows, ["Таб№"])["Таб№"]
-    return [_text(row[index]) for row in rows if any(row) and _text(row[index])]
-
-
-def parse_tabs(text):
-    parts = text.replace(",", " ").replace(";", " ").split()
-    return [p.strip() for p in parts if p.strip()]
+def set_turnout(queryset, voted=True):
+    fields = {"voted": voted, "voted_at": timezone.now() if voted else None}
+    if not voted:
+        fields["voted_method"] = ""
+    return queryset.update(**fields)
 
 
 def mark_voted(tabs, voted=True):
@@ -147,19 +148,80 @@ def mark_voted(tabs, voted=True):
         return 0, 0
     found = Employee.objects.filter(tab_number__in=tabs)
     missing = len(tabs) - found.count()
-    changed = found.update(voted=voted, voted_at=timezone.now() if voted else None)
-    return changed, missing
+    return set_turnout(found, voted), missing
+
+
+REPORT_WIDTHS = (14, 46, 10)
+
+
+def department_report(department, moment=None):
+    moment = moment or timezone.localtime()
+    people = Employee.objects.filter(department=department)
+    total = people.count()
+    voted = people.filter(voted=True).count()
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = f"Цех {department}"[:31]
+    for index, width in enumerate(REPORT_WIDTHS, 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+
+    bold = Font(bold=True)
+    title = sheet.cell(1, 1, f"Информация по голосованию на {moment:%d.%m.%y %H:%M}")
+    title.font = Font(bold=True, size=12)
+    sheet.cell(2, 1, f"Цех {department}").font = bold
+
+    for column, name in enumerate(
+        ("Общее количество голосующих", "Количество проголосовавших", "Процент"), 1
+    ):
+        cell = sheet.cell(4, column, name)
+        cell.font = bold
+        cell.alignment = Alignment(horizontal="center", wrap_text=True)
+
+    sheet.cell(5, 1, total).alignment = Alignment(horizontal="center")
+    sheet.cell(5, 2, voted).alignment = Alignment(horizontal="center")
+    share = sheet.cell(5, 3, (voted / total) if total else 0)
+    share.number_format = "0.00%"
+    share.alignment = Alignment(horizontal="center")
+
+    sheet.cell(7, 1, "Список НЕ принявших участие в голосовании:").font = bold
+
+    row = 8
+    for person in people.filter(voted=False).order_by("surname", "name", "patronymic"):
+        sheet.cell(row, 1, person.tab_number)
+        sheet.cell(row, 2, person.fio)
+        sheet.cell(row, 3, 1).alignment = Alignment(horizontal="center")
+        row += 1
+
+    return book
+
+
+def reports_archive(moment=None):
+    moment = moment or timezone.localtime()
+    departments = (
+        Employee.objects.exclude(department="")
+        .values_list("department", flat=True)
+        .distinct()
+        .order_by("department")
+    )
+    archiver = ReportArchiver()
+    for department in departments:
+        archiver.add_workbook(
+            department_report(department, moment), f"{department}.xlsx"
+        )
+    return archiver
 
 
 def export_xlsx():
     book = openpyxl.Workbook()
     sheet = book.active
     sheet.title = "Сотрудники"
-    sheet.append(list(COLUMNS) + ["Способ", "Проголосовал"])
+    sheet.append(list(COLUMNS) + ["Способ (план)", "Проголосовал", "Где голосовал"])
     fields = [COLUMNS[name] for name in COLUMNS]
     for person in Employee.objects.all().iterator(chunk_size=2000):
         row = [getattr(person, f) for f in fields]
         row.append(METHOD_LABELS.get(person.method, ""))
         row.append("да" if person.voted else "нет")
+        row.append(METHOD_LABELS.get(person.voted_method, ""))
         sheet.append(row)
     return book

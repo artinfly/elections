@@ -1,13 +1,9 @@
 <div class="filter-panel mb-3">
     <form method="get">
         <div class="d-flex flex-wrap gap-3 align-items-end">
-            <div class="filter-group">
-                <label class="filter-label">Таб№</label>
-                <input class="filter-input" type="text" name="tab" value="{{ f.tab }}" placeholder="Поиск...">
-            </div>
-            <div class="filter-group">
-                <label class="filter-label">ФИО</label>
-                <input class="filter-input" type="text" name="fio" value="{{ f.fio }}" placeholder="Поиск...">
+            <div class="filter-group grow">
+                <label class="filter-label">Поиск</label>
+                <input class="filter-input" type="text" name="q" value="{{ f.q }}" placeholder="Табельный номер или ФИО">
             </div>
             <div class="filter-group">
                 <label class="filter-label">Цех</label>
@@ -23,21 +19,29 @@
                     {% for u in uiks %}<option value="{{ u }}" {% if u == f.uik %}selected{% endif %}>{{ u }}</option>{% endfor %}
                 </select>
             </div>
-            {% if with_status %}
             <div class="filter-group">
-                <label class="filter-label">Способ</label>
+                <label class="filter-label">{% if with_status %}Планировал{% else %}Способ{% endif %}</label>
                 <select class="filter-select" name="method">
                     <option value="">Все</option>
                     <option value="none" {% if f.method == 'none' %}selected{% endif %}>Не назначен</option>
                     {% for code, label in methods %}<option value="{{ code }}" {% if f.method == code %}selected{% endif %}>{{ label }}</option>{% endfor %}
                 </select>
             </div>
+            {% if with_status %}
             <div class="filter-group">
                 <label class="filter-label">Явка</label>
                 <select class="filter-select" name="voted">
                     <option value="">Все</option>
                     <option value="yes" {% if f.voted == 'yes' %}selected{% endif %}>Проголосовал</option>
                     <option value="no" {% if f.voted == 'no' %}selected{% endif %}>Не голосовал</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label class="filter-label">Где голосовал</label>
+                <select class="filter-select" name="where">
+                    <option value="">Все</option>
+                    <option value="none" {% if f.where == 'none' %}selected{% endif %}>Не указано</option>
+                    {% for code, label in methods %}<option value="{{ code }}" {% if f.where == code %}selected{% endif %}>{{ label }}</option>{% endfor %}
                 </select>
             </div>
             {% endif %}

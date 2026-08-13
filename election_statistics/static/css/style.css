@@ -88,7 +88,13 @@ body {
     border-left-color: var(--orange);
 }
 
-.main-content { margin-left: 240px; padding: 1.5rem 1.75rem; min-height: 100vh; }
+.main-content {
+    margin-left: 240px; padding: 1.5rem 1.75rem;
+    height: 100vh; overflow-x: hidden; overflow-y: auto;
+    display: flex; flex-direction: column;
+}
+.main-content > * { flex: 0 0 auto; min-width: 0; }
+.main-content > .table-container { flex: 1 1 auto; min-height: 140px; max-height: none; }
 
 .page-header {
     display: flex; align-items: center; justify-content: space-between;
@@ -122,6 +128,8 @@ body {
     outline: none; transition: border-color 0.15s, box-shadow 0.15s;
 }
 .filter-input { width: 200px; }
+.filter-group.grow { flex: 1 1 280px; min-width: 220px; }
+.filter-group.grow .filter-input { width: 100%; }
 .filter-select { width: 110px; }
 .filter-input:focus, .filter-select:focus {
     border-color: var(--orange);

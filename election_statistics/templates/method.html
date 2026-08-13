@@ -14,10 +14,11 @@
         </div>
     </div>
     <div>
-        <div class="dash-card">
+        <button type="button" class="dash-card dash-card-action" id="uik-card"
+                title="Показать распределение по участкам">
             <div class="dash-card-icon" style="background:rgba(42,120,214,.12);color:#2a78d6">У</div>
-            <div><div class="dash-card-num">{{ counts.method.uik }}</div><div class="dash-card-lbl">УИК</div></div>
-        </div>
+            <div><div class="dash-card-num">{{ counts.method.uik }}</div><div class="dash-card-lbl">УИК<span class="dash-card-more">по участкам</span></div></div>
+        </button>
     </div>
     <div>
         <div class="dash-card">
@@ -43,7 +44,7 @@
 
 <div class="table-container">
 <table class="report-table">
-    <thead><tr><th>Цех</th><th>Таб№</th><th>ФИО</th><th>УИК</th><th>Способ</th></tr></thead>
+    <thead><tr><th>Цех</th><th>Таб№</th><th>ФИО</th><th>УИК</th><th class="col-method">Способ</th></tr></thead>
     <tbody>
     {% for r in rows %}
         <tr>
@@ -51,8 +52,8 @@
             <td>{{ r.tab_number }}</td>
             <td class="wrap">{{ r.fio }}</td>
             <td>{{ r.uik }}</td>
-            <td>
-                <span class="seg" data-id="{{ r.id }}">
+            <td class="col-method">
+                <span class="seg seg-method" data-id="{{ r.id }}">
                     {% for code, label in methods %}
                     <button type="button" data-m="{{ code }}" class="{% if r.method == code %}on{% endif %}">{{ label }}</button>
                     {% endfor %}

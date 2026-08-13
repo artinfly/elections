@@ -6,16 +6,17 @@ from django.core.paginator import Paginator
 from django.db.models import Count, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from .models import DEG, METHODS, UIK, UVZ, Employee
+from .models import DEG, METHOD_LABELS, METHODS, UIK, UVZ, Employee
 from .services import (
+    COLUMNS,
     export_xlsx,
     import_base,
-    import_methods,
     mark_voted,
-    parse_tabs,
-    read_tab_column,
+    reports_archive,
+    set_turnout,
 )
 
 PER_PAGE = 100
@@ -23,6 +24,10 @@ PER_PAGE = 100
 
 def is_operator(user):
     return user.is_superuser or user.groups.filter(name="operator").exists()
+
+
+def _known_method(value):
+    return value if value in METHOD_LABELS else ""
 
 
 def login_view(request):
@@ -49,22 +54,20 @@ def logout_view(request):
 
 def _filtered(params):
     qs = Employee.objects.all()
-    tab = (params.get("tab") or "").strip()
-    fio = (params.get("fio") or "").strip()
+    search = (params.get("q") or "").strip()
     dep = (params.get("dep") or "").strip()
     uik = (params.get("uik") or "").strip()
     method = (params.get("method") or "").strip()
+    where = (params.get("where") or "").strip()
     voted = (params.get("voted") or "").strip()
 
-    if tab:
-        qs = qs.filter(tab_number__icontains=tab)
-    if fio:
-        for part in fio.split():
-            qs = qs.filter(
-                Q(surname__icontains=part)
-                | Q(name__icontains=part)
-                | Q(patronymic__icontains=part)
-            )
+    for part in search.split():
+        qs = qs.filter(
+            Q(tab_number__icontains=part)
+            | Q(surname__icontains=part)
+            | Q(name__icontains=part)
+            | Q(patronymic__icontains=part)
+        )
     if dep:
         qs = qs.filter(department=dep)
     if uik:
@@ -73,6 +76,10 @@ def _filtered(params):
         qs = qs.filter(method="")
     elif method:
         qs = qs.filter(method=method)
+    if where == "none":
+        qs = qs.filter(voted_method="")
+    elif where:
+        qs = qs.filter(voted_method=where)
     if voted == "yes":
         qs = qs.filter(voted=True)
     elif voted == "no":
@@ -90,9 +97,10 @@ def _counts(qs=None):
         total=Count("id"),
     )
     voted = base.filter(voted=True).aggregate(
-        deg=Count("id", filter=Q(method=DEG)),
-        uik=Count("id", filter=Q(method=UIK)),
-        uvz=Count("id", filter=Q(method=UVZ)),
+        deg=Count("id", filter=Q(voted_method=DEG)),
+        uik=Count("id", filter=Q(voted_method=UIK)),
+        uvz=Count("id", filter=Q(voted_method=UVZ)),
+        none=Count("id", filter=Q(voted_method="")),
         total=Count("id"),
     )
     return {
@@ -108,7 +116,7 @@ def _context(request):
     return {
         "page": page,
         "rows": page.object_list,
-        "found": qs.count(),
+        "found": page.paginator.count,
         "counts": _counts(qs),
         "is_operator": is_operator(request.user),
         "methods": METHODS,
@@ -145,6 +153,7 @@ def upload_page(request):
         {
             "counts": _counts(),
             "is_operator": True,
+            "columns": list(COLUMNS),
             "msg": request.session.pop("msg", ""),
         },
     )
@@ -159,45 +168,13 @@ def upload_base(request):
     if not upload:
         return redirect("upload")
     try:
-        created, updated = import_base(upload)
-        request.session["msg"] = f"Загружено: новых {created}, обновлено {updated}"
+        created, updated, total = import_base(upload)
+        request.session["msg"] = (
+            f"Строк в файле: {total}. Новых работников: {created}, "
+            f"изменено: {updated}, без изменений: {total - created - updated}"
+        )
     except ValueError as exc:
         request.session["msg"] = str(exc)
-    return redirect("upload")
-
-
-@login_required
-@require_POST
-def upload_methods(request):
-    if not is_operator(request.user):
-        return JsonResponse({"error": "нет прав на загрузку файлов"}, status=403)
-    upload = request.FILES.get("file")
-    if not upload:
-        return redirect("upload")
-    try:
-        changed, skipped = import_methods(upload)
-        request.session["msg"] = f"Способ проставлен: {changed}, пропущено {skipped}"
-    except ValueError as exc:
-        request.session["msg"] = str(exc)
-    return redirect("upload")
-
-
-@login_required
-@require_POST
-def upload_voted(request):
-    if not is_operator(request.user):
-        return JsonResponse({"error": "нет прав на загрузку файлов"}, status=403)
-    tabs = []
-    upload = request.FILES.get("file")
-    if upload:
-        try:
-            tabs = read_tab_column(upload)
-        except ValueError as exc:
-            request.session["msg"] = str(exc)
-            return redirect("upload")
-    tabs += parse_tabs(request.POST.get("tabs", ""))
-    changed, missing = mark_voted(tabs)
-    request.session["msg"] = f"Отмечено: {changed}, не найдено {missing}"
     return redirect("upload")
 
 
@@ -205,7 +182,11 @@ def upload_voted(request):
 @require_POST
 def api_method(request):
     data = json.loads(request.body or "{}")
-    Employee.objects.filter(pk=data.get("id")).update(method=data.get("method", ""))
+    changed = Employee.objects.filter(pk=data.get("id")).update(
+        method=_known_method(data.get("method", ""))
+    )
+    if not changed:
+        return JsonResponse({"error": "работник не найден"}, status=404)
     return JsonResponse(_counts(_filtered(data.get("filters") or {})))
 
 
@@ -214,8 +195,16 @@ def api_method(request):
 def api_voted(request):
     data = json.loads(request.body or "{}")
     person = Employee.objects.filter(pk=data.get("id")).first()
-    if person:
-        mark_voted([person.tab_number], voted=bool(data.get("voted")))
+    if person is None:
+        return JsonResponse({"error": "работник не найден"}, status=404)
+
+    voted = bool(data.get("voted"))
+    where = data.get("method")
+    if where is not None:
+        Employee.objects.filter(pk=person.pk).update(
+            voted_method=_known_method(where) if voted else ""
+        )
+    mark_voted([person.tab_number], voted=voted)
     return JsonResponse(_counts(_filtered(data.get("filters") or {})))
 
 
@@ -225,19 +214,64 @@ def api_bulk_voted(request):
     data = json.loads(request.body or "{}")
     voted = bool(data.get("voted"))
     filters = data.get("filters") or {}
-    tabs = list(_filtered(filters).values_list("tab_number", flat=True))
-    changed, _ = mark_voted(tabs, voted=voted)
+    changed = set_turnout(_filtered(filters), voted)
     result = _counts(_filtered(filters))
     result["changed"] = changed
     return JsonResponse(result)
 
 
 @login_required
+def api_uik_stats(request):
+    rows = (
+        _filtered(request.GET)
+        .values("uik")
+        .annotate(people=Count("id"), came=Count("id", filter=Q(voted=True)))
+        .order_by("uik")
+    )
+    return JsonResponse(
+        list(rows), safe=False, json_dumps_params={"ensure_ascii": False}
+    )
+
+
+@login_required
 def export_page(request):
+    departments = (
+        Employee.objects.exclude(department="")
+        .values_list("department", flat=True)
+        .distinct()
+        .order_by("department")
+    )
+    return render(
+        request,
+        "export.html",
+        {
+            "counts": _counts(),
+            "is_operator": is_operator(request.user),
+            "departments": departments,
+            "msg": request.session.pop("msg", ""),
+        },
+    )
+
+
+@login_required
+def export_employees(request):
     book = export_xlsx()
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
     response["Content-Disposition"] = 'attachment; filename="employees.xlsx"'
     book.save(response)
+    return response
+
+
+@login_required
+def export_archive(request):
+    moment = timezone.localtime()
+    archiver = reports_archive(moment)
+    if not archiver.file_count:
+        request.session["msg"] = "Нет ни одного отдела — архив пустой"
+        return redirect("export")
+    response = HttpResponse(archiver.build_bytes(), content_type="application/zip")
+    name = f"otchety_po_cehams_{moment:%Y%m%d_%H%M}.zip"
+    response["Content-Disposition"] = f'attachment; filename="{name}"'
     return response

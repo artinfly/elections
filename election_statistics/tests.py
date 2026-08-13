@@ -1,10 +1,12 @@
+import io
+import zipfile
 from pathlib import Path
 
 from django.contrib.auth.models import Group, User
 from django.test import TestCase
 
-from .models import DEG, Employee
-from .services import import_base
+from .models import DEG, UVZ, Employee
+from .services import department_report, import_base
 
 TEMPLATE = Path(r"C:\Users\smiar\Desktop\excel\Книга1.xlsx")
 
@@ -35,7 +37,9 @@ class AccessTests(TestCase):
 
     def test_operator_may_open_upload(self):
         self.client.force_login(self.operator)
-        self.assertContains(self.client.get("/upload/"), "База сотрудников")
+        page = self.client.get("/upload/")
+        self.assertContains(page, "Колонки файла")
+        self.assertContains(page, "Таб№")
 
     def test_api_requires_login(self):
         self.assertEqual(
@@ -50,8 +54,9 @@ class ImportTests(TestCase):
     def test_template_columns_are_parsed(self):
         if not TEMPLATE.exists():
             self.skipTest("нет файла-образца")
-        created, updated = import_base(TEMPLATE)
+        created, updated, total = import_base(TEMPLATE)
         self.assertEqual(updated, 0)
+        self.assertEqual(created, total)
         self.assertTrue(created)
 
         person = Employee.objects.get(tab_number="0848103")
@@ -66,15 +71,189 @@ class ImportTests(TestCase):
         if not TEMPLATE.exists():
             self.skipTest("нет файла-образца")
         import_base(TEMPLATE)
-        Employee.objects.filter(tab_number="0848103").update(method=DEG, voted=True)
+        Employee.objects.filter(tab_number="0848103").update(
+            method=DEG, voted=True, voted_method=UVZ
+        )
 
-        created, updated = import_base(TEMPLATE)
+        created, updated, total = import_base(TEMPLATE)
         self.assertEqual(created, 0)
-        self.assertTrue(updated)
+        self.assertEqual(updated, 0)
+        self.assertTrue(total)
 
         person = Employee.objects.get(tab_number="0848103")
         self.assertEqual(person.method, DEG)
+        self.assertEqual(person.voted_method, UVZ)
         self.assertTrue(person.voted)
+
+
+class VotedApiTests(TestCase):
+    def setUp(self):
+        self.client.force_login(User.objects.create_user("u", password="x"))
+        self.person = Employee.objects.create(
+            tab_number="001", department="97", surname="Тест", name="Т"
+        )
+
+    def _post(self, payload):
+        return self.client.post("/api/voted/", payload, content_type="application/json")
+
+    def test_marks_turnout_without_place(self):
+        self._post({"id": self.person.pk, "voted": True})
+        self.person.refresh_from_db()
+        self.assertTrue(self.person.voted)
+        self.assertEqual(self.person.voted_method, "")
+
+    def test_place_does_not_touch_the_plan(self):
+        Employee.objects.filter(pk=self.person.pk).update(method=UVZ)
+        self._post({"id": self.person.pk, "voted": True, "method": DEG})
+        self.person.refresh_from_db()
+        self.assertTrue(self.person.voted)
+        self.assertEqual(self.person.voted_method, DEG)
+        self.assertEqual(self.person.method, UVZ)
+
+    def test_turnout_removal_clears_the_place(self):
+        self._post({"id": self.person.pk, "voted": True, "method": DEG})
+        self._post({"id": self.person.pk, "voted": False, "method": DEG})
+        self.person.refresh_from_db()
+        self.assertFalse(self.person.voted)
+        self.assertEqual(self.person.voted_method, "")
+
+    def test_bulk_removal_clears_the_place(self):
+        self._post({"id": self.person.pk, "voted": True, "method": DEG})
+        self.client.post(
+            "/api/bulk-voted/",
+            {"voted": False, "filters": {}},
+            content_type="application/json",
+        )
+        self.person.refresh_from_db()
+        self.assertFalse(self.person.voted)
+        self.assertEqual(self.person.voted_method, "")
+
+    def test_unknown_id_answers_404(self):
+        self.assertEqual(self._post({"id": 10**9, "voted": True}).status_code, 404)
+
+    def test_unknown_place_is_not_stored(self):
+        self._post({"id": self.person.pk, "voted": True, "method": "xyz"})
+        self.person.refresh_from_db()
+        self.assertEqual(self.person.voted_method, "")
+
+    def test_unknown_plan_is_not_stored(self):
+        self.client.post(
+            "/api/method/",
+            {"id": self.person.pk, "method": "zzz"},
+            content_type="application/json",
+        )
+        self.person.refresh_from_db()
+        self.assertEqual(self.person.method, "")
+
+
+class FilterTests(TestCase):
+    def setUp(self):
+        self.client.force_login(User.objects.create_user("f", password="x"))
+        Employee.objects.create(
+            tab_number="p1", department="10", surname="Планер", name="И", method=DEG
+        )
+        Employee.objects.create(
+            tab_number="p2",
+            department="10",
+            surname="Фактик",
+            name="И",
+            method=DEG,
+            voted=True,
+            voted_method=UVZ,
+        )
+
+    def test_plan_filter_works_on_both_pages(self):
+        for url in ["/", "/elections/"]:
+            page = self.client.get(url, {"method": DEG})
+            self.assertEqual(page.context["found"], 2, url)
+            page = self.client.get(url, {"method": UVZ})
+            self.assertEqual(page.context["found"], 0, url)
+
+    def test_place_filter(self):
+        self.assertEqual(
+            self.client.get("/elections/", {"where": UVZ}).context["found"], 1
+        )
+        self.assertEqual(
+            self.client.get("/elections/", {"where": "none"}).context["found"], 1
+        )
+
+
+class ReportTests(TestCase):
+    def setUp(self):
+        self.client.force_login(User.objects.create_user("u", password="x"))
+        for i in range(5):
+            Employee.objects.create(
+                tab_number=f"{i:06d}",
+                department="001",
+                surname=f"Первый{i}",
+                name="И",
+                voted=i < 3,
+            )
+        Employee.objects.create(
+            tab_number="900001", department="097", surname="Девятый", name="П"
+        )
+
+    def test_archive_holds_a_file_per_department(self):
+        response = self.client.get("/export/archive/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/zip")
+        names = zipfile.ZipFile(io.BytesIO(response.content)).namelist()
+        self.assertEqual(sorted(names), ["001.xlsx", "097.xlsx"])
+
+    def test_report_matches_the_sample(self):
+        book = department_report("001")
+        sheet = book.active
+        self.assertIn("Информация по голосованию", sheet.cell(1, 1).value)
+        self.assertEqual(sheet.cell(2, 1).value, "Цех 001")
+        self.assertEqual(sheet.cell(4, 1).value, "Общее количество голосующих")
+        self.assertEqual(sheet.cell(5, 1).value, 5)
+        self.assertEqual(sheet.cell(5, 2).value, 3)
+        self.assertAlmostEqual(sheet.cell(5, 3).value, 0.6)
+        self.assertEqual(sheet.cell(5, 3).number_format, "0.00%")
+        self.assertIn("НЕ принявших участие", sheet.cell(7, 1).value)
+
+        listed = [sheet.cell(r, 1).value for r in (8, 9)]
+        self.assertEqual(listed, ["000003", "000004"])
+        self.assertIsNone(sheet.cell(10, 1).value)
+
+    def test_report_without_people_gives_zero_percent(self):
+        Employee.objects.filter(department="001").delete()
+        self.assertEqual(department_report("001").active.cell(5, 3).value, 0)
+
+
+class UikStatsTests(TestCase):
+    def setUp(self):
+        self.client.force_login(User.objects.create_user("u", password="x"))
+        plan = [
+            ("2632", "10", True),
+            ("2632", "10", False),
+            ("2633", "20", True),
+            ("", "20", False),
+        ]
+        for i, (uik, dep, voted) in enumerate(plan):
+            Employee.objects.create(
+                tab_number=f"s{i}",
+                department=dep,
+                surname=f"С{i}",
+                name="И",
+                uik=uik,
+                voted=voted,
+            )
+
+    def test_breakdown_by_uik(self):
+        rows = self.client.get("/api/uik-stats/").json()
+        self.assertEqual(
+            rows,
+            [
+                {"uik": "", "people": 1, "came": 0},
+                {"uik": "2632", "people": 2, "came": 1},
+                {"uik": "2633", "people": 1, "came": 1},
+            ],
+        )
+
+    def test_breakdown_follows_the_filter(self):
+        rows = self.client.get("/api/uik-stats/", {"dep": "10"}).json()
+        self.assertEqual(rows, [{"uik": "2632", "people": 2, "came": 1}])
 
 
 class CountsTests(TestCase):
