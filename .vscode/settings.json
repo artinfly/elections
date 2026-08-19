@@ -20,12 +20,6 @@
     "emmet.includeLanguages": {
         "django-html": "html"
     },
-    "files.exclude": {
-        "**/__pycache__": true,
-        "**/*.pyc": true,
-        "staticfiles": true,
-        "wheels": true
-    },
     "search.exclude": {
         "**/.venv": true,
         "**/staticfiles": true,
