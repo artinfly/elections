@@ -1,4 +1,5 @@
 import re
+from contextlib import contextmanager
 from datetime import datetime
 
 import openpyxl
@@ -57,12 +58,18 @@ def _date(value):
     return None
 
 
-def _open(upload):
+@contextmanager
+def _sheet(upload):
     try:
         book = openpyxl.load_workbook(upload, read_only=True, data_only=True)
     except Exception:
         raise ValueError(BAD_FORMAT)
-    return book.active.iter_rows(values_only=True)
+    rows = book.active.iter_rows(values_only=True)
+    try:
+        yield rows
+    finally:
+        rows.close()
+        book.close()
 
 
 def _header(rows, wanted):
@@ -110,12 +117,12 @@ def _known_rows(tabs, fields):
 
 
 def import_base(upload):
-    rows = _open(upload)
-    positions = _header(rows, COLUMNS)
-    if "Таб№" not in positions:
-        raise ValueError(BAD_FORMAT)
+    with _sheet(upload) as rows:
+        positions = _header(rows, COLUMNS)
+        if "Таб№" not in positions:
+            raise ValueError(BAD_FORMAT)
+        parsed = _rows_by_tab(rows, positions)
 
-    parsed = _rows_by_tab(rows, positions)
     if not parsed:
         return 0, 0, 0
 
@@ -174,11 +181,13 @@ REPORT_MODES = {
 }
 
 
+def padded_number(value):
+    name = (value or "").strip()
+    return f"{int(name):03d}" if name.isdigit() else name
+
+
 def department_file_name(department):
-    name = department.strip()
-    if name.isdigit():
-        return f"{int(name):03d}"
-    return BAD_NAME_CHARS.sub("-", name)
+    return BAD_NAME_CHARS.sub("-", padded_number(department))
 
 
 def department_report(department, moment=None, mode="turnout"):
@@ -220,7 +229,6 @@ def department_report(department, moment=None, mode="turnout"):
     ):
         sheet.cell(row, 1, person.tab_number)
         sheet.cell(row, 2, person.fio)
-        sheet.cell(row, 3, 1).alignment = Alignment(horizontal="center")
         row += 1
 
     return book
@@ -235,10 +243,16 @@ def reports_archive(moment=None, mode="turnout"):
         .order_by()
     )
     archiver = ReportArchiver()
+    taken = set()
     for department in sorted(departments, key=_by_number):
+        name = department_file_name(department)
+        unique, attempt = name, 2
+        while unique in taken:
+            unique = f"{name}-{attempt}"
+            attempt += 1
+        taken.add(unique)
         archiver.add_workbook(
-            department_report(department, moment, mode),
-            f"{department_file_name(department)}.xlsx",
+            department_report(department, moment, mode), f"{unique}.xlsx"
         )
     return archiver
 
@@ -298,7 +312,10 @@ def summary_table(group_field="department", group_title="Подразделен�
             row["plan_uvz"],
             row["came"],
         )
-        sheet.cell(line, 1, row[group_field])
+        label = row[group_field]
+        if group_field == "department":
+            label = padded_number(label)
+        sheet.cell(line, 1, label)
         for shift, value in enumerate(values, 2):
             sheet.cell(line, shift, value).alignment = Alignment(horizontal="center")
         share = sheet.cell(line, 7, row["came"] / row["people"] if row["people"] else 0)
@@ -330,7 +347,7 @@ def export_xlsx():
     sheet = book.active
     sheet.title = "Сотрудники"
     sheet.append(list(COLUMNS) + ["Способ (план)", "Проголосовал", "Где голосовал"])
-    fields = [COLUMNS[name] for name in COLUMNS]
+    fields = list(COLUMNS.values())
     for person in Employee.objects.all().iterator(chunk_size=2000):
         row = [getattr(person, f) for f in fields]
         row.append(METHOD_LABELS.get(person.method, ""))
