@@ -31,6 +31,20 @@ def _known_method(value):
     return value if value in METHOD_LABELS else ""
 
 
+def _body(request):
+    try:
+        return json.loads(request.body or "{}"), None
+    except ValueError:
+        return None, JsonResponse({"error": "неверный формат запроса"}, status=400)
+
+
+def _pk(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def login_view(request):
     if request.user.is_authenticated:
         return redirect("method")
@@ -114,6 +128,8 @@ def _counts(qs=None):
 def _context(request):
     qs = _filtered(request.GET)
     page = Paginator(qs, PER_PAGE).get_page(request.GET.get("page"))
+    params = request.GET.copy()
+    params.pop("page", None)
     return {
         "page": page,
         "rows": page.object_list,
@@ -130,7 +146,7 @@ def _context(request):
         .distinct()
         .order_by("uik"),
         "f": request.GET,
-        "query": request.GET.urlencode(),
+        "query": params.urlencode(),
     }
 
 
@@ -182,8 +198,10 @@ def upload_base(request):
 @login_required
 @require_POST
 def api_method(request):
-    data = json.loads(request.body or "{}")
-    changed = Employee.objects.filter(pk=data.get("id")).update(
+    data, bad = _body(request)
+    if bad:
+        return bad
+    changed = Employee.objects.filter(pk=_pk(data.get("id"))).update(
         method=_known_method(data.get("method", ""))
     )
     if not changed:
@@ -194,24 +212,39 @@ def api_method(request):
 @login_required
 @require_POST
 def api_voted(request):
-    data = json.loads(request.body or "{}")
-    person = Employee.objects.filter(pk=data.get("id")).first()
+    data, bad = _body(request)
+    if bad:
+        return bad
+    person = Employee.objects.filter(pk=_pk(data.get("id"))).first()
     if person is None:
         return JsonResponse({"error": "работник не найден"}, status=404)
 
-    mark_voted([person.tab_number], voted=bool(data.get("voted")))
+    voted = bool(data.get("voted"))
+    if voted and not person.method:
+        return JsonResponse(
+            {"error": "У работника не выбран способ голосования"}, status=400
+        )
+    mark_voted([person.tab_number], voted=voted)
     return JsonResponse(_counts(_filtered(data.get("filters") or {})))
 
 
 @login_required
 @require_POST
 def api_bulk_voted(request):
-    data = json.loads(request.body or "{}")
+    data, bad = _body(request)
+    if bad:
+        return bad
     voted = bool(data.get("voted"))
     filters = data.get("filters") or {}
-    changed = set_turnout(_filtered(filters), voted)
+    target = _filtered(filters)
+    skipped = 0
+    if voted:
+        skipped = target.filter(method="").count()
+        target = target.exclude(method="")
+    changed = set_turnout(target, voted)
     result = _counts(_filtered(filters))
     result["changed"] = changed
+    result["skipped"] = skipped
     return JsonResponse(result)
 
 
@@ -230,11 +263,8 @@ def api_uik_stats(request):
 
 @login_required
 def export_page(request):
-    departments = (
-        Employee.objects.exclude(department="")
-        .values_list("department", flat=True)
-        .distinct()
-        .order_by("department")
+    departments_count = (
+        Employee.objects.exclude(department="").values("department").distinct().count()
     )
     return render(
         request,
@@ -242,7 +272,7 @@ def export_page(request):
         {
             "counts": _counts(),
             "is_operator": is_operator(request.user),
-            "departments": departments,
+            "departments_count": departments_count,
             "msg": request.session.pop("msg", ""),
         },
     )

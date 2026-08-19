@@ -1,6 +1,5 @@
 import io
 import zipfile
-from pathlib import Path
 
 import openpyxl
 from django.contrib.auth.models import Group, User
@@ -8,13 +7,52 @@ from django.test import TestCase
 
 from .models import DEG, UVZ, Employee
 from .services import (
+    COLUMNS,
     department_file_name,
     department_report,
     import_base,
+    reports_archive,
     summary_table,
 )
 
-TEMPLATE = Path(r"C:\Users\smiar\Desktop\excel\Книга1.xlsx")
+SAMPLE = {
+    "department": "97",
+    "tab_number": "0848103",
+    "surname": "Иванов",
+    "name": "Иван",
+    "patronymic": "Иванович",
+    "position": "Слесарь",
+    "category": "Рабочий",
+    "birth_date": "17.11.1975",
+    "region": "Свердловская",
+    "city": "Нижний Тагил",
+    "street": "Ленина",
+    "house": "1",
+    "uik": "2632",
+    "uik_address": "Школа 1",
+    "district": "Дзержинский",
+    "okrug": "21",
+}
+
+
+def _book(headers, rows):
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.append(headers)
+    for row in rows:
+        sheet.append(row)
+    buffer = io.BytesIO()
+    book.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
+def _sample_file(*people):
+    people = people or (SAMPLE,)
+    return _book(
+        list(COLUMNS),
+        [[person.get(COLUMNS[name], "") for name in COLUMNS] for person in people],
+    )
 
 
 class AccessTests(TestCase):
@@ -57,39 +95,46 @@ class AccessTests(TestCase):
 
 
 class ImportTests(TestCase):
-    def test_template_columns_are_parsed(self):
-        if not TEMPLATE.exists():
-            self.skipTest("нет файла-образца")
-        created, updated, total = import_base(TEMPLATE)
-        self.assertEqual(updated, 0)
-        self.assertEqual(created, total)
-        self.assertTrue(created)
+    def test_all_columns_are_parsed(self):
+        created, updated, total = import_base(_sample_file())
+        self.assertEqual((created, updated, total), (1, 0, 1))
 
         person = Employee.objects.get(tab_number="0848103")
         self.assertEqual(person.department, "97")
-        self.assertEqual(person.surname, "Амбарян")
-        self.assertEqual(person.position, "Врач-хирург")
+        self.assertEqual(person.surname, "Иванов")
+        self.assertEqual(person.position, "Слесарь")
         self.assertEqual(str(person.birth_date), "1975-11-17")
         self.assertEqual(person.uik, "2632")
         self.assertEqual(person.okrug, "21")
 
     def test_second_import_keeps_method_and_voted(self):
-        if not TEMPLATE.exists():
-            self.skipTest("нет файла-образца")
-        import_base(TEMPLATE)
+        import_base(_sample_file())
         Employee.objects.filter(tab_number="0848103").update(
             method=DEG, voted=True, voted_method=UVZ
         )
 
-        created, updated, total = import_base(TEMPLATE)
-        self.assertEqual(created, 0)
-        self.assertEqual(updated, 0)
-        self.assertTrue(total)
+        created, updated, total = import_base(_sample_file())
+        self.assertEqual((created, updated, total), (0, 0, 1))
 
         person = Employee.objects.get(tab_number="0848103")
         self.assertEqual(person.method, DEG)
         self.assertEqual(person.voted_method, UVZ)
         self.assertTrue(person.voted)
+
+    def test_changed_row_is_counted_as_updated(self):
+        import_base(_sample_file())
+        moved = dict(SAMPLE, department="130")
+        created, updated, total = import_base(_sample_file(moved))
+        self.assertEqual((created, updated, total), (0, 1, 1))
+        self.assertEqual(Employee.objects.get(tab_number="0848103").department, "130")
+
+    def test_file_without_tab_number_is_refused(self):
+        with self.assertRaises(ValueError):
+            import_base(_book(["Фамилия", "Имя"], [["Иванов", "Иван"]]))
+
+    def test_broken_file_is_refused(self):
+        with self.assertRaises(ValueError):
+            import_base(io.BytesIO(b"not a workbook"))
 
 
 class VotedApiTests(TestCase):
@@ -110,10 +155,11 @@ class VotedApiTests(TestCase):
         self.assertEqual(self.person.voted_method, UVZ)
         self.assertEqual(self.person.method, UVZ)
 
-    def test_without_a_plan_the_place_stays_empty(self):
-        self._post({"id": self.person.pk, "voted": True})
+    def test_without_a_plan_the_turnout_is_refused(self):
+        response = self._post({"id": self.person.pk, "voted": True})
+        self.assertEqual(response.status_code, 400)
         self.person.refresh_from_db()
-        self.assertTrue(self.person.voted)
+        self.assertFalse(self.person.voted)
         self.assertEqual(self.person.voted_method, "")
 
     def test_place_is_not_taken_from_the_request(self):
@@ -268,12 +314,12 @@ class SummaryTests(TestCase):
     def test_rows_sorted_as_numbers(self):
         sheet = summary_table().active
         names = [sheet.cell(r, 1).value for r in range(2, sheet.max_row)]
-        self.assertEqual(names, ["7", "97", "130"])
+        self.assertEqual(names, ["007", "097", "130"])
 
     def test_counts_and_total(self):
         sheet = summary_table().active
         first = [sheet.cell(2, c).value for c in range(1, 7)]
-        self.assertEqual(first, ["7", 2, 1, 0, 1, 1])
+        self.assertEqual(first, ["007", 2, 1, 0, 1, 1])
         self.assertAlmostEqual(sheet.cell(2, 7).value, 0.5)
         self.assertEqual(sheet.cell(2, 7).number_format, "0.00%")
 
@@ -397,3 +443,47 @@ class CountsTests(TestCase):
         body = response.json()
         self.assertEqual(body["method"]["total"], 2)
         self.assertEqual(body["method"]["deg"], 1)
+
+
+class BadRequestTests(TestCase):
+    def setUp(self):
+        self.client.force_login(User.objects.create_user("u", password="x"))
+
+    def test_broken_json_answers_400(self):
+        for url in ["/api/method/", "/api/voted/", "/api/bulk-voted/"]:
+            response = self.client.post(
+                url, "{не json", content_type="application/json"
+            )
+            self.assertEqual(response.status_code, 400, url)
+
+    def test_unknown_id_type_answers_404(self):
+        for url in ["/api/method/", "/api/voted/"]:
+            response = self.client.post(
+                url, {"id": "не число"}, content_type="application/json"
+            )
+            self.assertEqual(response.status_code, 404, url)
+
+
+class PaginationTests(TestCase):
+    def setUp(self):
+        self.client.force_login(User.objects.create_user("u", password="x"))
+        for number in range(120):
+            Employee.objects.create(
+                tab_number=str(number), department="7", surname="А", name="И"
+            )
+
+    def test_page_is_not_repeated_in_the_link(self):
+        page = self.client.get("/", {"dep": "7", "page": 2})
+        self.assertEqual(page.context["query"], "dep=7")
+        self.assertNotContains(page, "page=2&page=")
+
+
+class ArchiveNameTests(TestCase):
+    def test_departments_with_the_same_number_do_not_collide(self):
+        for tab, department in (("a", "7"), ("b", "007")):
+            Employee.objects.create(
+                tab_number=tab, department=department, surname="А", name="И"
+            )
+        names = reports_archive().filenames
+        self.assertEqual(len(names), 2)
+        self.assertEqual(len(set(names)), 2)
