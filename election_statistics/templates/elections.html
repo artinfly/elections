@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Выборы{% endblock %}
+{% block title %}Голосование{% endblock %}
 {% block content %}
 <div class="page-header">
-    <h5>Выборы</h5>
+    <h5>Голосование</h5>
     <span class="row-count-label">Найдено: {{ found }}</span>
 </div>
 
@@ -107,6 +107,10 @@ document.querySelectorAll('.vote-btn').forEach(function (btn) {
     btn.addEventListener('click', function () {
         var row = btn.closest('tr');
         var voted = !btn.classList.contains('on');
+        if (voted && !btn.dataset.plan) {
+            alert('Сначала выберите способ голосования на странице "Способ голосования".');
+            return;
+        }
         postJSON('/api/voted/', {id: btn.dataset.id, voted: voted}).then(function (c) {
             paint(row, voted);
             setCounts(c);
@@ -114,14 +118,29 @@ document.querySelectorAll('.vote-btn').forEach(function (btn) {
     });
 });
 
+var FOUND = {{ found }}
+var BULK_LIMIT = 100;
+
 function bulk(voted) {
+    if (FOUND >= BULK_LIMIT) {
+        var action = voted ? 'Отметить явку' : 'Снять отметку';
+        if (!confirm(action + ' сразу у ' + FOUND + ' записей?\n\nОтменить это одним действием не получится.')) {
+            return;
+        }
+    }
     postJSON('/api/bulk-voted/', {voted: voted}).then(function (c) {
         setCounts(c);
         var msg = document.getElementById('bulk-msg');
         msg.textContent = 'Изменено записей: ' + c.changed;
+        if (c.skipped) {
+            msg.textContent += '. Пропущено без способа голосования: ' + c.skipped;
+        }
         msg.style.display = 'block';
         document.querySelectorAll('.report-table tbody tr').forEach(function (row) {
-            if (row.querySelector('.vote-btn')) paint(row, voted);
+            var btn = row.querySelector('.vote-btn');
+            if (!btn) return;
+            if (voted && !btn.dataset.plan) return;
+            paint(row, voted);
         });
     });
 }

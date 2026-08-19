@@ -19,13 +19,13 @@
 
     <div class="nav-section">Учёт</div>
     <a class="nav-link {% if request.resolver_match.url_name == 'method' %}active{% endif %}" href="{% url 'method' %}">Способ голосования</a>
-    <a class="nav-link {% if request.resolver_match.url_name == 'elections' %}active{% endif %}" href="{% url 'elections' %}">Выборы</a>
+    <a class="nav-link {% if request.resolver_match.url_name == 'elections' %}active{% endif %}" href="{% url 'elections' %}">Голосование</a>
 
     <div class="nav-section">Данные</div>
     {% if is_operator %}
     <a class="nav-link {% if request.resolver_match.url_name == 'upload' %}active{% endif %}" href="{% url 'upload' %}">Загрузка</a>
     {% endif %}
-    <a class="nav-link {% if request.resolver_match.url_name == 'export' %}active{% endif %}" href="{% url 'export' %}">Выгрузка</a>
+    <a class="nav-link {% if request.resolver_match.url_name == 'export' %}active{% endif %}" href="{% url 'export' %}">Отчёты</a>
 
     <div class="sidebar-logout">
         <a href="{% url 'logout' %}">

@@ -339,18 +339,3 @@ body.login-page {
 }
 .card-block + .block-title { margin-top: 18px; }
 
-.stage-total .dash-card-icon { background: rgba(37,99,235,.12); color: #2563eb; }
-.stage-wait  .dash-card-icon { background: rgba(190,12,12,.12);  color: #be0c0c; }
-.stage-late  .dash-card-icon { background: rgba(235,104,52,.12); color: #eb6834; }
-.stage-move  .dash-card-icon { background: rgba(235,104,52,.12); color: #eb6834; }
-.stage-ready .dash-card-icon { background: rgba(42,120,214,.12); color: #2a78d6; }
-.stage-done  .dash-card-icon { background: rgba(22,163,74,.12);  color: #16a34a; }
-.stage-metric .dash-card-icon { background: rgba(82,81,78,.10);  color: #52514e; }
-
-.stage-total .dash-card-num { color: var(--text); }
-.stage-wait  .dash-card-num { color: #be0c0c; }
-.stage-late  .dash-card-num { color: #eb6834; }
-.stage-move  .dash-card-num { color: #eb6834; }
-.stage-ready .dash-card-num { color: #2a78d6; }
-.stage-done  .dash-card-num { color: #16a34a; }
-.stage-metric .dash-card-num { color: var(--text); }
