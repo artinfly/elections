@@ -40,6 +40,7 @@
             <a class="btn-orange" href="{% url 'export_method_archive' %}">Скачать</a>
         </div>
     </div>
+
     <div class="card-block export-row">
         <div class="export-text">
             <div class="block-title">Сводная таблица по цехам</div>
@@ -52,6 +53,22 @@
             <div class="export-num">{{ departments_count }}</div>
             <div class="export-unit">строк</div>
             <a class="btn-orange" href="{% url 'export_summary' %}">Скачать</a>
+        </div>
+    </div>
+
+    <div class="card-block export-row">
+        <div class="export-text">
+            <div class="block-title">Разделение по производствам</div>
+            <div class="hint">
+                Цеха сгруппированы по производствам: для каждого число работающих,
+                количество проголосовавших и процент. Под каждым производством
+                строка «Итого».
+            </div>
+        </div>
+        <div class="export-side">
+            <div class="export-num">{{ productions_count }}</div>
+            <div class="export-unit">производств</div>
+            <a class="btn-orange" href="{% url 'export_productions' %}">Скачать</a>
         </div>
     </div>
 

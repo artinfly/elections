@@ -10,6 +10,9 @@ METHOD_LABELS = dict(METHODS)
 class Employee(models.Model):
     tab_number = models.CharField("Таб№", max_length=20, unique=True)
     department = models.CharField("Подразделение", max_length=50, db_index=True)
+    production = models.CharField(
+        "Производство", max_length=200, blank=True, db_index=True
+    )
     surname = models.CharField("Фамилия", max_length=100)
     name = models.CharField("Имя", max_length=100)
     patronymic = models.CharField("Отчество", max_length=100, blank=True)

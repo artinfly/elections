@@ -265,6 +265,89 @@ def _by_number(value):
     return (0, int(name), "") if name.isdigit() else (1, 0, name)
 
 
+NO_PRODUCTION = "Без производства"
+PRODUCTION_WIDTHS = (16, 14, 16, 10)
+
+
+def _share_row(sheet, line, label, people, came, bold=None):
+    cells = (
+        sheet.cell(line, 1, label),
+        sheet.cell(line, 2, people),
+        sheet.cell(line, 3, came),
+        sheet.cell(line, 4, came / people if people else 0),
+    )
+    for cell in cells[1:]:
+        cell.alignment = Alignment(horizontal="center")
+    cells[3].number_format = "0.00%"
+    if bold:
+        for cell in cells:
+            cell.font = bold
+    return line + 1
+
+
+def production_table():
+    grouped = {}
+    for row in (
+        Employee.objects.exclude(department="")
+        .values("production", "department")
+        .annotate(people=Count("id"), came=Count("id", filter=Q(voted=True)))
+        .order_by()
+    ):
+        grouped.setdefault(row["production"] or NO_PRODUCTION, []).append(row)
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "По производствам"
+    for index, width in enumerate(PRODUCTION_WIDTHS, 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+
+    bold = Font(bold=True)
+    sheet.merge_cells("A1:A2")
+    sheet.merge_cells("B1:B2")
+    sheet.merge_cells("C1:D1")
+    for coordinate, title in (
+        ("A1", "Подразделение"),
+        ("B1", "Общее число работающих"),
+        ("C1", "Итог"),
+        ("C2", "Количество проголосовавших"),
+        ("D2", "%"),
+    ):
+        cell = sheet[coordinate]
+        cell.value = title
+        cell.font = bold
+        cell.alignment = Alignment(
+            horizontal="center", vertical="center", wrap_text=True
+        )
+
+    line = 3
+    total_people = total_came = 0
+    for production in sorted(grouped, key=lambda name: (name == NO_PRODUCTION, name)):
+        sheet.merge_cells(start_row=line, start_column=1, end_row=line, end_column=4)
+        sheet.cell(line, 1, production).font = bold
+        line += 1
+
+        people = came = 0
+        for row in sorted(
+            grouped[production], key=lambda item: _by_number(item["department"])
+        ):
+            line = _share_row(
+                sheet,
+                line,
+                padded_number(row["department"]),
+                row["people"],
+                row["came"],
+            )
+            people += row["people"]
+            came += row["came"]
+
+        line = _share_row(sheet, line, "Итого", people, came, bold=bold)
+        total_people += people
+        total_came += came
+
+    _share_row(sheet, line + 1, "Всего", total_people, total_came, bold=bold)
+    return book
+
+
 def summary_table(group_field="department", group_title="Подразделение"):
     rows = sorted(
         Employee.objects.exclude(**{group_field: ""})

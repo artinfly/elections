@@ -15,6 +15,7 @@ from .services import (
     export_xlsx,
     import_base,
     mark_voted,
+    production_table,
     reports_archive,
     set_turnout,
     summary_table,
@@ -266,6 +267,9 @@ def export_page(request):
     departments_count = (
         Employee.objects.exclude(department="").values("department").distinct().count()
     )
+    productions_count = (
+        Employee.objects.exclude(production="").values("production").distinct().count()
+    )
     return render(
         request,
         "export.html",
@@ -273,6 +277,7 @@ def export_page(request):
             "counts": _counts(),
             "is_operator": is_operator(request.user),
             "departments_count": departments_count,
+            "productions_count": productions_count,
             "msg": request.session.pop("msg", ""),
         },
     )
@@ -285,6 +290,18 @@ def export_summary(request):
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
     name = f"svodka_po_ceham_{timezone.localtime():%Y%m%d_%H%M}.xlsx"
+    response["Content-Disposition"] = f'attachment; filename="{name}"'
+    book.save(response)
+    return response
+
+
+@login_required
+def export_productions(request):
+    book = production_table()
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    name = f"po_proizvodstvam_{timezone.localtime():%Y%m%d_%H%M}.xlsx"
     response["Content-Disposition"] = f'attachment; filename="{name}"'
     book.save(response)
     return response
