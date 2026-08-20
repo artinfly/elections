@@ -45,12 +45,6 @@ class ReportArchiver:
             filename, buffer.getvalue(), folder=folder, overwrite=overwrite
         )
 
-    def remove_file(self, filename: str, folder: Optional[str] = None) -> None:
-        self._files.pop(self._key(filename, folder), None)
-
-    def clear(self) -> None:
-        self._files.clear()
-
     @property
     def file_count(self) -> int:
         return len(self._files)
