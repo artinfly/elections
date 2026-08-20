@@ -4,16 +4,28 @@ import zipfile
 import openpyxl
 from django.contrib.auth.models import Group, User
 from django.test import TestCase
+from django.urls import get_resolver, reverse
 
 from .models import DEG, UVZ, Employee
 from .services import (
     COLUMNS,
+    NO_PRODUCTION,
     department_file_name,
     department_report,
     import_base,
+    production_table,
     reports_archive,
     summary_table,
 )
+
+
+def _all_urls():
+    return [
+        reverse(pattern.name)
+        for pattern in get_resolver("election_statistics.urls").url_patterns
+        if pattern.name not in ("login", "logout")
+    ]
+
 
 SAMPLE = {
     "department": "97",
@@ -62,7 +74,9 @@ class AccessTests(TestCase):
         self.operator.groups.add(Group.objects.create(name="operator"))
 
     def test_anonymous_redirected_to_login(self):
-        for url in ["/", "/elections/", "/upload/", "/export/"]:
+        urls = _all_urls()
+        self.assertEqual(len(urls), 14)
+        for url in urls:
             response = self.client.get(url)
             self.assertEqual(response.status_code, 302, url)
             self.assertIn("/login/", response["Location"], url)
@@ -487,3 +501,66 @@ class ArchiveNameTests(TestCase):
         names = reports_archive().filenames
         self.assertEqual(len(names), 2)
         self.assertEqual(len(set(names)), 2)
+
+
+class ProductionTests(TestCase):
+    def setUp(self):
+        self.client.force_login(User.objects.create_user("u", password="x"))
+        people = (
+            ("a", "7", "Механосборочное", True),
+            ("b", "7", "Механосборочное", False),
+            ("c", "130", "Механосборочное", True),
+            ("d", "44", "Инструментальное", False),
+            ("e", "101", "", True),
+        )
+        for tab, department, production, voted in people:
+            Employee.objects.create(
+                tab_number=tab,
+                department=department,
+                production=production,
+                surname="А",
+                name="И",
+                voted=voted,
+            )
+
+    def test_rows_are_grouped_by_production(self):
+        sheet = production_table().active
+        labels = [sheet.cell(row, 1).value for row in range(3, sheet.max_row + 1)]
+        self.assertEqual(
+            labels,
+            [
+                "Инструментальное",
+                "044",
+                "Итого",
+                "Механосборочное",
+                "007",
+                "130",
+                "Итого",
+                NO_PRODUCTION,
+                "101",
+                "Итого",
+                None,
+                "Всего",
+            ],
+        )
+
+    def test_totals_and_share(self):
+        sheet = production_table().active
+        rows = {sheet.cell(row, 1).value: row for row in range(3, sheet.max_row + 1)}
+        last = rows["Всего"]
+        self.assertEqual(sheet.cell(last, 2).value, 5)
+        self.assertEqual(sheet.cell(last, 3).value, 3)
+        self.assertAlmostEqual(sheet.cell(last, 4).value, 0.6)
+        self.assertEqual(sheet.cell(last, 4).number_format, "0.00%")
+
+    def test_workshop_without_production_goes_to_the_last_group(self):
+        sheet = production_table().active
+        labels = [sheet.cell(row, 1).value for row in range(3, sheet.max_row + 1)]
+        self.assertEqual(labels.index(NO_PRODUCTION), len(labels) - 5)
+
+    def test_export_page_counts_only_filled_productions(self):
+        page = self.client.get("/export/")
+        self.assertEqual(page.context["productions_count"], 2)
+
+    def test_download(self):
+        self.assertEqual(self.client.get("/export/productions/").status_code, 200)
