@@ -27,6 +27,10 @@
     {% endif %}
     <a class="nav-link {% if request.resolver_match.url_name == 'export' %}active{% endif %}" href="{% url 'export' %}">Отчёты</a>
 
+    {% if user.is_superuser %}
+    <a class="nav-link" href="/admin/">Админка</a>
+    {% endif %}
+
     <div class="sidebar-logout">
         <a href="{% url 'logout' %}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
