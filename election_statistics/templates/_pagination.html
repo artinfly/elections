@@ -1,8 +1,21 @@
 {% if page.paginator.num_pages > 1 %}
-<div class="d-flex align-items-center gap-2 mt-3">
-    {% if page.has_previous %}<a class="pgn-btn" href="?{{ query }}&page={{ page.previous_page_number }}">←</a>{% endif %}
-    <span class="pgn-btn pgn-active">{{ page.number }}</span>
-    <span class="row-count-label">из {{ page.paginator.num_pages }}</span>
-    {% if page.has_next %}<a class="pgn-btn" href="?{{ query }}&page={{ page.next_page_number }}">→</a>{% endif %}
+<div class="d-flex align-items-center gap-1 mt-3 flex-wrap">
+    {% if page.has_previous %}
+        <a class="pgn-btn" href="?{{ query }}&page={{ page.previous_page_number }}">←</a>
+    {% endif %}
+
+    {% for num in page_range %}x
+        {% if num == page.number %}
+            <span class="pgn-btn pgn-active">{{ num }}</span>
+        {% else %}
+            <a class="pgn-btn" href="?{{ query }}&page={{ num }}">{{ num }}</a>
+        {% endif %}
+    {% endfor %}
+
+    {% if page.has_next %}
+        <a class="pgn-btn" href="?{{ query }}&page={{ page.next_page_number }}">→</a>
+    {% endif %}
+
+    <span class="row-count-label ms-2">из {{ page.paginator.num_pages }}</span>
 </div>
 {% endif %}

@@ -126,6 +126,22 @@ def _counts(qs=None):
     }
 
 
+def _page_window(page, size=5):
+    """Номера страниц вокруг текущей, всего не больше size."""
+    total = page.paginator.num_pages
+    current = page.number
+    if total <= size:
+        return range(1, total + 1)
+    half = size // 2
+    start = current - half
+    end = current + half
+    if start < 1:
+        start, end = 1, size
+    if end > total:
+        start, end = total - size + 1, total
+    return range(start, end + 1)
+
+
 def _context(request):
     qs = _filtered(request.GET)
     page = Paginator(qs, PER_PAGE).get_page(request.GET.get("page"))
@@ -148,6 +164,7 @@ def _context(request):
         .order_by("uik"),
         "f": request.GET,
         "query": params.urlencode(),
+        "page_range": _page_window(page),
     }
 
 
