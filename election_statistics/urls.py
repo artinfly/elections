@@ -13,9 +13,19 @@ urlpatterns = [
     path("export/employees/", views.export_employees, name="export_employees"),
     path("export/summary/", views.export_summary, name="export_summary"),
     path(
+        "export/summary-no-u19/",
+        views.export_summary_no_19,
+        name="export_summary_no_19",
+    ),
+    path(
         "export/productions/",
         views.export_productions,
         name="export_productions",
+    ),
+    path(
+        "export/productions-methods/",
+        views.export_production_methods,
+        name="export_production_methods",
     ),
     path("export/archive/", views.export_archive, name="export_archive"),
     path(

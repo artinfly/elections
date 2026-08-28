@@ -41,8 +41,6 @@
 }
 
 .dash-card.red .dash-card-num { color: #be0c0c; }
-.dash-row.five > div { flex: 0 0 calc(20% - 10px); }
-@media (max-width: 992px) { .dash-row.five > div { flex: 0 0 calc(50% - 6px); } }
 
 .hint { font-size: .75rem; color: var(--text-muted); margin-top: .35rem; }
 .ok-msg {

@@ -45,8 +45,8 @@
         <div class="export-text">
             <div class="block-title">Сводная таблица по цехам</div>
             <div class="hint">
-                Один файл, строка на цех: сколько людей, сколько выбрали ДЭГ, УИК и
-                УИК-УВЗ, сколько проголосовало и процент явки. Внизу строка «Итого».
+                Один файл, строка на цех: сколько людей, сколько выбрали ДЭГ, УИК,
+                УИК-УВЗ и УИК-19, сколько проголосовало и процент явки. Внизу строка «Итого».
             </div>
         </div>
         <div class="export-side">
@@ -58,7 +58,22 @@
 
     <div class="card-block export-row">
         <div class="export-text">
-            <div class="block-title">Разделение по производствам</div>
+            <div class="block-title">Сводная таблица по цехам (Без 19 округа)</div>
+            <div class="hint">
+                Та же таблица, но без 19 округа: сколько людей, сколько выбрали ДЭГ, УИК и
+                УИК-УВЗ и УИК-19, сколько проголосовало и процент явки. Внизу строка «Итого».
+            </div>
+        </div>
+        <div class="export-side">
+            <div class="export-num">{{ departments_count }}</div>
+            <div class="export-unit">строк</div>
+            <a class="btn-orange" href="{% url 'export_summary_no_19' %}">Скачать</a>
+        </div>
+    </div>
+
+    <div class="card-block export-row">
+        <div class="export-text">
+            <div class="block-title">Разделение по производствам (Голосование)</div>
             <div class="hint">
                 Цеха сгруппированы по производствам: для каждого число работающих,
                 количество проголосовавших и процент. Под каждым производством
@@ -69,6 +84,22 @@
             <div class="export-num">{{ productions_count }}</div>
             <div class="export-unit">производств</div>
             <a class="btn-orange" href="{% url 'export_productions' %}">Скачать</a>
+        </div>
+    </div>
+
+    <div class="card-block export-row">
+        <div class="export-text">
+            <div class="block-title">Способы голосования по производствам</div>
+            <div class="hint">
+                То же разделение по производствам, но вместо явки - способы голосования, общее
+                количество проголосовавших и процент. Под каждым производством
+                строка «Итого».
+            </div>
+        </div>
+        <div class="export-side">
+            <div class="export-num">{{ productions_count }}</div>
+            <div class="export-unit">производств</div>
+            <a class="btn-orange" href="{% url 'export_production_methods' %}">Скачать</a>
         </div>
     </div>
 

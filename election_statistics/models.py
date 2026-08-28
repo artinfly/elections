@@ -3,7 +3,8 @@ from django.db import models
 DEG = "deg"
 UIK = "uik"
 UVZ = "uvz"
-METHODS = [(DEG, "ДЭГ"), (UIK, "УИК"), (UVZ, "УИК-УВЗ")]
+UIK19 = "u19"
+METHODS = [(DEG, "ДЭГ"), (UIK, "УИК"), (UVZ, "УИК-УВЗ"), (UIK19, "УИК-19")]
 METHOD_LABELS = dict(METHODS)
 
 

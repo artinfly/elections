@@ -6,7 +6,7 @@
     <span class="row-count-label">Найдено: {{ found }}</span>
 </div>
 
-<div class="dash-row five mb-4">
+<div class="dash-row mb-4">
     <div>
         <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(37,99,235,.12);color:#2563eb">Д</div>
@@ -24,6 +24,12 @@
         <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(235,104,52,.12);color:#eb6834">В</div>
             <div><div class="dash-card-num">{{ counts.voted.uvz }}</div><div class="dash-card-lbl">УИК-УВЗ</div></div>
+        </div>
+    </div>
+    <div>
+        <div class="dash-card">
+            <div class="dash-card-icon" style="background:rgba(124,58,237,.12);color:#7c3aed">19</div>
+            <div><div class="dash-card-num">{{ counts.voted.u19 }}</div><div class="dash-card-lbl">УИК-19</div></div>
         </div>
     </div>
     <div>
@@ -54,7 +60,7 @@
 <div class="table-container">
 <table class="report-table">
     <thead><tr>
-        <th>Цех</th><th>Таб№</th><th>ФИО</th><th>УИК</th>
+        <th>Цех</th><th>Таб№</th><th>ФИО</th><th>Округ</th><th>УИК</th>
         <th class="col-turnout-simple">Явка</th>
         <th class="col-turnout">Где голосовал</th>
     </tr></thead>
@@ -64,6 +70,7 @@
             <td>{{ r.department }}</td>
             <td>{{ r.tab_number }}</td>
             <td class="wrap">{{ r.fio }}</td>
+            <td>{{ r.okrug }}</td>
             <td>{{ r.uik }}</td>
             <td class="col-turnout-simple">
                 <button type="button" class="vote-btn {% if r.voted %}on{% endif %}"
@@ -76,7 +83,7 @@
             </td>
         </tr>
     {% empty %}
-        <tr><td colspan="6">Нет данных</td></tr>
+        <tr><td colspan="7">Нет данных</td></tr>
     {% endfor %}
     </tbody>
 </table>
@@ -91,8 +98,9 @@ function setCounts(c) {
     n[0].textContent = c.voted.deg;
     n[1].textContent = c.voted.uik;
     n[2].textContent = c.voted.uvz;
-    n[3].textContent = c.voted.total;
-    n[4].textContent = c.no_uik;
+    n[3].textContent = c.voted.u19;
+    n[4].textContent = c.voted.total;
+    n[5].textContent = c.no_uik;
 }
 function paint(row, voted) {
     var btn = row.querySelector('.vote-btn');

@@ -9,16 +9,18 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from .models import DEG, METHOD_LABELS, METHODS, UIK, UVZ, Employee
+from .models import DEG, METHOD_LABELS, METHODS, UIK, UIK19, UVZ, Employee
 from .services import (
     COLUMNS,
     export_xlsx,
     import_base,
     mark_voted,
+    production_method_table,
     production_table,
     reports_archive,
     set_turnout,
     summary_table,
+    summary_table_no_u19,
 )
 
 PER_PAGE = 100
@@ -72,6 +74,7 @@ def _filtered(params):
     qs = Employee.objects.all()
     search = (params.get("q") or "").strip()
     dep = (params.get("dep") or "").strip()
+    okrug = (params.get("okrug") or "").strip()
     uik = (params.get("uik") or "").strip()
     method = (params.get("method") or "").strip()
     where = (params.get("where") or "").strip()
@@ -86,6 +89,10 @@ def _filtered(params):
         )
     if dep:
         qs = qs.filter(department=dep)
+    if okrug == "none":
+        qs = qs.filter(okrug="")
+    elif okrug:
+        qs = qs.filter(okrug=okrug)
     if uik:
         qs = qs.filter(uik=uik)
     if method == "none":
@@ -109,6 +116,7 @@ def _counts(qs=None):
         deg=Count("id", filter=Q(method=DEG)),
         uik=Count("id", filter=Q(method=UIK)),
         uvz=Count("id", filter=Q(method=UVZ)),
+        u19=Count("id", filter=Q(method=UIK19)),
         none=Count("id", filter=Q(method="")),
         total=Count("id"),
     )
@@ -116,6 +124,7 @@ def _counts(qs=None):
         deg=Count("id", filter=Q(voted_method=DEG)),
         uik=Count("id", filter=Q(voted_method=UIK)),
         uvz=Count("id", filter=Q(voted_method=UVZ)),
+        u19=Count("id", filter=Q(method=UIK19)),
         none=Count("id", filter=Q(voted_method="")),
         total=Count("id"),
     )
@@ -158,6 +167,10 @@ def _context(request):
         .values_list("department", flat=True)
         .distinct()
         .order_by("department"),
+        "okrugs": Employee.objects.exclude(okrug="")
+        .values_list("okrug", flat=True)
+        .distinct()
+        .order_by("okrug"),
         "uiks": Employee.objects.exclude(uik="")
         .values_list("uik", flat=True)
         .distinct()
@@ -313,6 +326,18 @@ def export_summary(request):
 
 
 @login_required
+def export_summary_no_19(request):
+    book = summary_table_no_u19()
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    name = f"svodka_po_ceham_bez_u19_{timezone.localtime():%Y%m%d_%H%M}.xlsx"
+    response["Content-Disposition"] = f'attachment; filename="{name}"'
+    book.save(response)
+    return response
+
+
+@login_required
 def export_productions(request):
     book = production_table()
     response = HttpResponse(
@@ -344,6 +369,18 @@ def _archive_response(request, mode, prefix):
     response = HttpResponse(archiver.build_bytes(), content_type="application/zip")
     name = f"{prefix}_po_ceham_{moment:%Y%m%d_%H%M}.zip"
     response["Content-Disposition"] = f'attachment; filename="{name}"'
+    return response
+
+
+@login_required
+def export_production_methods(request):
+    book = production_method_table()
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    name = f"sposoby_po_proizvodstvam_{timezone.localtime():%Y%m%d_%H%M}.xlsx"
+    response["Content-Disposition"] = f'attachment; filename="{name}"'
+    book.save(response)
     return response
 
 

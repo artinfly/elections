@@ -13,6 +13,14 @@
                 </select>
             </div>
             <div class="filter-group">
+                <label class="filter-label">Округ</label>
+                <select class="filter-select" name="okrug">
+                    <option value="">Все</option>
+                    <option value="none" {% if f.okrug == "none" %}selected{% endif %}>Пусто</option>
+                    {% for o in okrugs %}<option value="{{ o }}" {% if o == f.okrug %}selected{% endif %}>{{ o }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="filter-group">
                 <label class="filter-label">УИК</label>
                 <select class="filter-select" name="uik">
                     <option value="">Все</option>

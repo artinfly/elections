@@ -6,7 +6,7 @@
     <span class="row-count-label">Найдено: {{ found }}</span>
 </div>
 
-<div class="dash-row five mb-4">
+<div class="dash-row mb-4">
     <div>
         <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(37,99,235,.12);color:#2563eb">Д</div>
@@ -28,6 +28,12 @@
     </div>
     <div>
         <div class="dash-card">
+            <div class="dash-card-icon" style="background:rgba(124,58,237,.12);color:#7c3aed">19</div>
+            <div><div class="dash-card-num">{{ counts.voted.u19 }}</div><div class="dash-card-lbl">УИК-19</div></div>
+        </div>
+    </div>
+    <div>
+        <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(136,136,136,.12);color:#888">—</div>
             <div><div class="dash-card-num">{{ counts.method.none }}</div><div class="dash-card-lbl">Не назначен</div></div>
         </div>
@@ -44,13 +50,14 @@
 
 <div class="table-container">
 <table class="report-table">
-    <thead><tr><th>Цех</th><th>Таб№</th><th>ФИО</th><th>УИК</th><th class="col-method">Способ</th></tr></thead>
+    <thead><tr><th>Цех</th><th>Таб№</th><th>ФИО</th><th>Округ</th><th>УИК</th><th class="col-method">Способ</th></tr></thead>
     <tbody>
     {% for r in rows %}
         <tr>
             <td>{{ r.department }}</td>
             <td>{{ r.tab_number }}</td>
             <td class="wrap">{{ r.fio }}</td>
+            <td>{{ r.okrug }}</td>
             <td>{{ r.uik }}</td>
             <td class="col-method">
                 <span class="seg seg-method" data-id="{{ r.id }}">
@@ -61,7 +68,7 @@
             </td>
         </tr>
     {% empty %}
-        <tr><td colspan="5">Нет данных</td></tr>
+        <tr><td colspan="6">Нет данных</td></tr>
     {% endfor %}
     </tbody>
 </table>
@@ -86,7 +93,8 @@ document.querySelectorAll('.seg').forEach(function (seg) {
             n[0].textContent = c.method.deg;
             n[1].textContent = c.method.uik;
             n[2].textContent = c.method.uvz;
-            n[3].textContent = c.method.none;
+            n[3].textContent = c.method.u19;
+            n[4].textContent = c.method.none;
         });
     });
 });

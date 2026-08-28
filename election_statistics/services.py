@@ -10,7 +10,7 @@ from openpyxl.utils import get_column_letter
 
 from utils.archiver import ReportArchiver
 
-from .models import DEG, METHOD_LABELS, UIK, UVZ, Employee
+from .models import DEG, METHOD_LABELS, UIK, UIK19, UVZ, Employee
 
 BAD_FORMAT = "Ошибка, документ не соответствует формату"
 
@@ -257,7 +257,7 @@ def reports_archive(moment=None, mode="turnout"):
     return archiver
 
 
-SUMMARY_WIDTHS = (18, 16, 10, 10, 12, 16, 10)
+SUMMARY_WIDTHS = (18, 16, 10, 10, 12, 12, 16, 10)
 
 
 def _by_number(value):
@@ -348,6 +348,128 @@ def production_table():
     return book
 
 
+PRODUCTION_METHOD_WIDTHS = (16, 10, 10, 12, 10, 16, 20, 12)
+
+
+def _method_share_row(sheet, line, label, people, deg, uik, uvz, u19, bold=None):
+    chosen = deg + uik + uvz + u19
+    cells = (
+        sheet.cell(line, 1, label),
+        sheet.cell(line, 2, people),
+        sheet.cell(line, 3, deg),
+        sheet.cell(line, 4, uik),
+        sheet.cell(line, 5, uvz),
+        sheet.cell(line, 6, u19),
+        sheet.cell(line, 7, chosen),
+        sheet.cell(line, 8, chosen / people if people else 0),
+    )
+    for cell in cells[1:]:
+        cell.alignment = Alignment(horizontal="center")
+    cells[7].number_format = "0.00%"
+    if bold:
+        for cell in cells:
+            cell.font = bold
+    return line + 1
+
+
+def production_method_table():
+    grouped = {}
+    for row in (
+        Employee.objects.exclude(department="")
+        .values("production", "department")
+        .annotate(
+            people=Count("id"),
+            deg=Count("id", filter=Q(method=DEG)),
+            uik=Count("id", filter=Q(method=UIK)),
+            uvz=Count("id", filter=Q(method=UVZ)),
+            u19=Count("id", filter=Q(method=UIK19)),
+        )
+        .order_by()
+    ):
+        grouped.setdefault(row["production"] or NO_PRODUCTION, []).append(row)
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "Способы по производствам"
+    for index, width in enumerate(PRODUCTION_METHOD_WIDTHS, 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+
+    bold = Font(bold=True)
+    sheet.merge_cells("A1:A2")
+    sheet.merge_cells("B1:B2")
+    sheet.merge_cells("C1:F1")
+    sheet.merge_cells("G1:H1")
+    for coordinate, title in (
+        ("A1", "Подразделение"),
+        ("B1", "Общее количество"),
+        ("C1", "Способ голосования"),
+        ("C2", "ДЭГ"),
+        ("D2", "УИК"),
+        ("E2", "УИК-УВЗ"),
+        ("F2", "УИК-19"),
+        ("G1", "Итог"),
+        ("G2", "Кол-во зарегестрированных"),
+        ("H2", "%"),
+    ):
+        cell = sheet[coordinate]
+        cell.value = title
+        cell.font = bold
+        cell.alignment = Alignment(
+            horizontal="center", vertical="center", wrap_text=True
+        )
+
+    line = 3
+    totals = dict.fromkeys(("people", "deg", "uik", "uvz", "u19"), 0)
+    for production in sorted(grouped, key=lambda name: (name == NO_PRODUCTION, name)):
+        sheet.merge_cells(start_row=line, start_column=1, end_row=line, end_column=7)
+        sheet.cell(line, 1, production).font = bold
+        line += 1
+
+        sub = dict.fromkeys(("people", "deg", "uik", "uvz", "u19"), 0)
+        for row in sorted(
+            grouped[production], key=lambda item: _by_number(item["department"])
+        ):
+            line = _method_share_row(
+                sheet,
+                line,
+                padded_number(row["department"]),
+                row["people"],
+                row["deg"],
+                row["uik"],
+                row["uvz"],
+                row["u19"],
+            )
+            for key in sub:
+                sub[key] += row[key]
+
+        line = _method_share_row(
+            sheet,
+            line,
+            "Итого",
+            sub["people"],
+            sub["deg"],
+            sub["uik"],
+            sub["uvz"],
+            sub["u19"],
+            bold=bold,
+        )
+        for key in sub:
+            totals[key] += sub[key]
+
+    _method_share_row(
+        sheet,
+        line + 1,
+        "Всего",
+        totals["people"],
+        totals["deg"],
+        totals["uik"],
+        totals["uvz"],
+        totals["u19"],
+        bold=bold,
+    )
+    return book
+
+
 def summary_table(group_field="department", group_title="Подразделение"):
     rows = sorted(
         Employee.objects.exclude(**{group_field: ""})
@@ -357,6 +479,90 @@ def summary_table(group_field="department", group_title="Подразделен�
             plan_deg=Count("id", filter=Q(method=DEG)),
             plan_uik=Count("id", filter=Q(method=UIK)),
             plan_uvz=Count("id", filter=Q(method=UVZ)),
+            plan_u19=Count("id", filter=Q(method=UIK19)),
+            came=Count("id", filter=Q(voted=True)),
+        )
+        .order_by(),
+        key=lambda row: _by_number(row[group_field]),
+    )
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "Сводка"
+    for index, width in enumerate((18, 16, 10, 10, 12, 16, 10), 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+
+    bold = Font(bold=True)
+    centered = Alignment(horizontal="center", wrap_text=True)
+    headers = (
+        group_title,
+        "Количество людей",
+        "ДЭГ",
+        "УИК",
+        "УИК-УВЗ",
+        "УИК-19",
+        "Проголосовавшие",
+        "Процент",
+    )
+    for column, name in enumerate(headers, 1):
+        cell = sheet.cell(1, column, name)
+        cell.font = bold
+        cell.alignment = centered
+
+    totals = dict.fromkeys(
+        ("people", "plan_deg", "plan_uik", "plan_uvz", "plan_u19", "came"), 0
+    )
+    line = 2
+    for row in rows:
+        values = (
+            row["people"],
+            row["plan_deg"],
+            row["plan_uik"],
+            row["plan_uvz"],
+            row["plan_u19"],
+            row["came"],
+        )
+        label = row[group_field]
+        if group_field == "department":
+            label = padded_number(label)
+        sheet.cell(line, 1, label)
+        for shift, value in enumerate(values, 2):
+            sheet.cell(line, shift, value).alignment = Alignment(horizontal="center")
+        share = sheet.cell(line, 8, row["came"] / row["people"] if row["people"] else 0)
+        share.number_format = "0.00%"
+        share.alignment = Alignment(horizontal="center")
+        for key in totals:
+            totals[key] += row[key]
+        line += 1
+
+    sheet.cell(line, 1, "Итого").font = bold
+    for shift, key in enumerate(
+        ("people", "plan_deg", "plan_uik", "plan_uvz", "plan_u19", "came"), 2
+    ):
+        cell = sheet.cell(line, shift, totals[key])
+        cell.font = bold
+        cell.alignment = Alignment(horizontal="center")
+    share = sheet.cell(
+        line, 8, totals["came"] / totals["people"] if totals["people"] else 0
+    )
+    share.font = bold
+    share.number_format = "0.00%"
+    share.alignment = Alignment(horizontal="center")
+
+    return book
+
+
+def summary_table_no_u19(group_field="department", group_title="Подразделение"):
+    rows = sorted(
+        Employee.objects.exclude(**{group_field: ""})
+        .exclude(okrug="19")
+        .values(group_field)
+        .annotate(
+            people=Count("id"),
+            plan_deg=Count("id", filter=Q(method=DEG)),
+            plan_uik=Count("id", filter=Q(method=UIK)),
+            plan_uvz=Count("id", filter=Q(method=UVZ)),
+            plan_u19=Count("id", filter=Q(method=UIK19)),
             came=Count("id", filter=Q(voted=True)),
         )
         .order_by(),
@@ -377,6 +583,7 @@ def summary_table(group_field="department", group_title="Подразделен�
         "ДЭГ",
         "УИК",
         "УИК-УВЗ",
+        "УИК-19",
         "Проголосовавшие",
         "Процент",
     )
@@ -385,7 +592,9 @@ def summary_table(group_field="department", group_title="Подразделен�
         cell.font = bold
         cell.alignment = centered
 
-    totals = dict.fromkeys(("people", "plan_deg", "plan_uik", "plan_uvz", "came"), 0)
+    totals = dict.fromkeys(
+        ("people", "plan_deg", "plan_uik", "plan_uvz", "plan_u19", "came"), 0
+    )
     line = 2
     for row in rows:
         values = (
@@ -393,6 +602,7 @@ def summary_table(group_field="department", group_title="Подразделен�
             row["plan_deg"],
             row["plan_uik"],
             row["plan_uvz"],
+            row["plan_u19"],
             row["came"],
         )
         label = row[group_field]
@@ -401,7 +611,7 @@ def summary_table(group_field="department", group_title="Подразделен�
         sheet.cell(line, 1, label)
         for shift, value in enumerate(values, 2):
             sheet.cell(line, shift, value).alignment = Alignment(horizontal="center")
-        share = sheet.cell(line, 7, row["came"] / row["people"] if row["people"] else 0)
+        share = sheet.cell(line, 8, row["came"] / row["people"] if row["people"] else 0)
         share.number_format = "0.00%"
         share.alignment = Alignment(horizontal="center")
         for key in totals:
@@ -410,13 +620,13 @@ def summary_table(group_field="department", group_title="Подразделен�
 
     sheet.cell(line, 1, "Итого").font = bold
     for shift, key in enumerate(
-        ("people", "plan_deg", "plan_uik", "plan_uvz", "came"), 2
+        ("people", "plan_deg", "plan_uik", "plan_uvz", "plan_u19", "came"), 2
     ):
         cell = sheet.cell(line, shift, totals[key])
         cell.font = bold
         cell.alignment = Alignment(horizontal="center")
     share = sheet.cell(
-        line, 7, totals["came"] / totals["people"] if totals["people"] else 0
+        line, 8, totals["came"] / totals["people"] if totals["people"] else 0
     )
     share.font = bold
     share.number_format = "0.00%"
