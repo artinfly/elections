@@ -1,3 +1,6 @@
+/* ============================================================
+   Переключатель способа голосования в таблице (страница method)
+   ============================================================ */
 .seg { display: flex; gap: 8px; width: 100%; }
 .seg button {
     flex: 1 1 0;
@@ -7,6 +10,7 @@
     transition: all .12s;
 }
 
+/* Кнопки способа: подсветка при наведении и активное состояние */
 .seg-method button { border-radius: 5px; }
 .seg-method button:hover { border-color: var(--orange); color: var(--orange); }
 .seg-method button.on {
@@ -14,7 +18,11 @@
     color: #fff; font-weight: 600;
 }
 
+/* ============================================================
+   Страница "Голосование": колонки явки, бейдж места, кнопка явки
+   ============================================================ */
 .report-table .col-method { width: 300px; }
+/* Бейдж "где проголосовал": пунктирная рамка, виден только при заполненном voted_method */
 .place-badge {
     display: inline-block;
     border: 2px dashed #2563eb; border-radius: 14px;
@@ -24,11 +32,13 @@
 }
 .place-badge[hidden] { display: none; }
 
+/* Ширины колонок явки и разделительная линия перед блоком "Где голосовал" */
 .report-table .col-turnout { width: 170px; }
 .report-table .col-turnout-simple { width: 130px; }
 .report-table td.col-turnout { border-left: 2px solid var(--border); }
 .report-table th.col-turnout { border-left: 2px solid #555; }
 
+/* Кнопка отметки явки в строке таблицы */
 .vote-btn {
     border: 1px solid #ddd; background: #fff; border-radius: 5px;
     padding: .18rem .7rem; font-size: .75rem; cursor: pointer;
@@ -40,8 +50,12 @@
     color: #16a34a; font-weight: 600;
 }
 
+/* Красная карточка счётчика "Пусто УИК" */
 .dash-card.red .dash-card-num { color: #be0c0c; }
 
+/* ============================================================
+   Служебные сообщения и подсказки
+   ============================================================ */
 .hint { font-size: .75rem; color: var(--text-muted); margin-top: .35rem; }
 .ok-msg {
     font-size: .8rem; color: #16a34a; background: rgba(22, 163, 74, .1);
@@ -53,11 +67,15 @@
 }
 textarea.form-control { min-height: 70px; resize: vertical; margin-top: 8px; }
 
+/* ============================================================
+   Страница загрузки: узкий контейнер, строка файла, памятка формата
+   ============================================================ */
 .narrow { max-width: 760px; display: flex; flex-direction: column; gap: 1rem; }
 
 .file-row { display: flex; gap: .6rem; align-items: center; }
 .file-row input[type="file"] { flex: 1 1 auto; min-width: 0; }
 
+/* Памятка "принимается только XLSX" с оранжевым бейджем формата */
 .fmt-line {
     display: flex; gap: .5rem; align-items: baseline; margin-top: .9rem;
     font-size: .79rem; color: var(--text-secondary); line-height: 1.5;
@@ -68,15 +86,20 @@ textarea.form-control { min-height: 70px; resize: vertical; margin-top: 8px; }
 }
 .fmt-line b { color: var(--orange-dark); }
 
+/* Чипы со списком ожидаемых колонок файла */
 .chip-grid { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: .8rem; }
 .chip {
     font-size: .74rem; padding: .16rem .5rem; border-radius: 4px;
     background: #f7f7f7; border: 1px solid var(--border); color: var(--text);
 }
 
+/* ============================================================
+   Страница отчётов: карточки выгрузок
+   ============================================================ */
 .export-row { display: flex; gap: 1.5rem; align-items: center; }
 .export-text { flex: 1 1 auto; min-width: 0; }
 .export-text .hint { margin-top: .35rem; }
+/* Правая часть карточки: число, единица и кнопка скачивания */
 .export-side {
     flex: 0 0 auto; width: 96px;
     display: flex; flex-direction: column; align-items: center; gap: .25rem;
@@ -84,10 +107,14 @@ textarea.form-control { min-height: 70px; resize: vertical; margin-top: 8px; }
 .export-num { font-size: 1.7rem; font-weight: 700; color: var(--orange-dark); line-height: 1; }
 .export-unit { font-size: .72rem; color: var(--text-muted); margin-bottom: .35rem; }
 
+/* Ссылки, оформленные как кнопки: убираем подчёркивание и центрируем */
 a.btn-orange, a.btn-ghost {
     text-decoration: none; display: inline-block; text-align: center; line-height: 1.4;
 }
 
+/* ============================================================
+   Кликабельная карточка УИК (открывает модалку с разбивкой по участкам)
+   ============================================================ */
 .dash-card-action {
     width: 100%; text-align: left; font-family: inherit;
     border: 1px solid var(--border); cursor: pointer;
@@ -97,11 +124,15 @@ a.btn-orange, a.btn-ghost {
     border-color: #2a78d6;
     box-shadow: 0 2px 10px rgba(42, 120, 214, .18);
 }
+/* Подпись "по участкам" внутри карточки УИК */
 .dash-card-more {
     display: block; font-size: .64rem; color: #2a78d6;
     text-transform: none; letter-spacing: 0; margin-top: 1px;
 }
 
+/* ============================================================
+   Модальное окно "Люди по участкам"
+   ============================================================ */
 .modal-back {
     position: fixed; inset: 0; z-index: 100;
     background: rgba(0, 0, 0, .45);
@@ -127,6 +158,7 @@ a.btn-orange, a.btn-ghost {
 .modal-body { overflow: auto; padding: 0; }
 .modal-empty { padding: 1.5rem 1.25rem; font-size: .82rem; color: var(--text-muted); }
 
+/* Таблица внутри модалки: липкая шапка и липкая строка "Итого" */
 .modal-table { width: 100%; border-collapse: separate; border-spacing: 0; }
 .modal-table thead th {
     position: sticky; top: 0; background: var(--header-bg); color: #e8e8e8;
@@ -137,6 +169,7 @@ a.btn-orange, a.btn-ghost {
     font-size: .8rem; padding: .35rem 1.25rem;
     border-bottom: 1px solid #f0f0f0;
 }
+/* Числовые колонки выравниваются по правому краю */
 .modal-table tbody td:not(:first-child) { text-align: right; }
 .modal-table thead th:not(:first-child) { text-align: right; }
 .modal-table tbody tr:hover td { background: #fafafa; }

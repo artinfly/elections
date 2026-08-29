@@ -12,8 +12,11 @@ from utils.archiver import ReportArchiver
 
 from .models import DEG, METHOD_LABELS, UIK, UIK19, UVZ, Employee
 
+# Сообщение об ошибке, если загруженный файл не похож на ожидаемую таблицу
 BAD_FORMAT = "Ошибка, документ не соответствует формату"
 
+# Соответствие заголовков колонок Excel-файла полям модели Employee.
+# Используется при импорте базы сотрудников.
 COLUMNS = {
     "Подразделение": "department",
     "Таб№": "tab_number",
@@ -35,6 +38,10 @@ COLUMNS = {
 
 
 def _text(value):
+    """
+    Приводит значение ячейки Excel к строке.
+    Целочисленные float (например 123.0) превращает в "123" без хвоста ".0".
+    """
     if value is None:
         return ""
     if isinstance(value, float) and value.is_integer():
@@ -43,6 +50,11 @@ def _text(value):
 
 
 def _date(value):
+    """
+    Разбирает дату рождения из ячейки Excel.
+    Поддерживает datetime, date и строки в форматах "дд.мм.гггг" и "гггг-мм-дд".
+    Возвращает date или None, если распознать не удалось.
+    """
     if isinstance(value, datetime):
         return value.date()
     if hasattr(value, "year"):
@@ -60,6 +72,11 @@ def _date(value):
 
 @contextmanager
 def _sheet(upload):
+    """
+    Контекст-менеджер для чтения загруженного файла.
+    Открывает книгу в режиме только чтения (read_only) и отдаёт итератор строк.
+    Гарантированно закрывает книгу и строки даже при ошибке.
+    """
     try:
         book = openpyxl.load_workbook(upload, read_only=True, data_only=True)
     except Exception:
@@ -73,6 +90,11 @@ def _sheet(upload):
 
 
 def _header(rows, wanted):
+    """
+    Ищет строку с заголовками колонок в файле.
+    Сравнивает ячейки без учёта регистра и возвращает словарь {заголовок: индекс колонки}.
+    Если подходящая строка не найдена — файл не соответствует формату.
+    """
     lookup = {name.casefold(): name for name in wanted}
     for row in rows:
         found = {}
@@ -85,10 +107,16 @@ def _header(rows, wanted):
     raise ValueError(BAD_FORMAT)
 
 
+# Размер пачки для bulk_create / bulk_update при импорте
 BATCH = 500
 
 
 def _rows_by_tab(rows, positions):
+    """
+    Разбирает строки файла в словарь {табельный номер: значения полей}.
+    Пустые строки и строки без табельного номера пропускаются.
+    Если табномер встретился несколько раз, побеждает последняя строка.
+    """
     parsed = {}
     for row in rows:
         if not any(row):
@@ -105,6 +133,11 @@ def _rows_by_tab(rows, positions):
 
 
 def _known_rows(tabs, fields):
+    """
+    Подтягивает из базы уже существующих сотрудников по табельным номерам.
+    Запрос идёт чанками по 2000 номеров, чтобы не упереться в лимиты СУБД.
+    Возвращает словарь {табельный номер: текущие значения полей из БД}.
+    """
     known = {}
     tabs = list(tabs)
     for start in range(0, len(tabs), 2000):
@@ -117,6 +150,12 @@ def _known_rows(tabs, fields):
 
 
 def import_base(upload):
+    """
+    Импорт базы сотрудников из Excel-файла.
+    Сравнивает строки файла с базой: новые записи создаёт (bulk_create),
+    изменившиеся обновляет (bulk_update), неизменённые не трогает.
+    Возвращает кортеж (создано, обновлено, всего строк).
+    """
     with _sheet(upload) as rows:
         positions = _header(rows, COLUMNS)
         if "Таб№" not in positions:
@@ -145,6 +184,11 @@ def import_base(upload):
 
 
 def set_turnout(queryset, voted=True):
+    """
+    Массово проставляет явку одним UPDATE-запросом по всему queryset.
+    При voted=True ставит текущее время и копирует запланированный способ в voted_method.
+    При voted=False сбрасывает отметку (время и способ очищаются).
+    """
     return queryset.update(
         voted=voted,
         voted_at=timezone.now() if voted else None,
@@ -153,6 +197,10 @@ def set_turnout(queryset, voted=True):
 
 
 def mark_voted(tabs, voted=True):
+    """
+    Отмечает явку (или снимает отметку) по списку табельных номеров.
+    Возвращает кортеж (сколько отмечено, сколько номеров не найдено в базе).
+    """
     tabs = {t for t in tabs if t}
     if not tabs:
         return 0, 0
@@ -161,10 +209,13 @@ def mark_voted(tabs, voted=True):
     return set_turnout(found, voted), missing
 
 
+# Ширины колонок в отчёте по одному цеху
 REPORT_WIDTHS = (14, 46, 10)
 
+# Символы, недопустимые в именах файлов и листов Excel — заменяются на дефис
 BAD_NAME_CHARS = re.compile(r"[\\/*?:\[\]]")
 
+# Настройки двух режимов отчёта по цеху: явка (turnout) и выбор способа (method)
 REPORT_MODES = {
     "turnout": {
         "title": "Информация по голосованию на",
@@ -182,15 +233,27 @@ REPORT_MODES = {
 
 
 def padded_number(value):
+    """
+    Дополняет числовой номер цеха нулями до трёх знаков ("7" -> "007").
+    Нечисловые значения возвращает как есть.
+    """
     name = (value or "").strip()
     return f"{int(name):03d}" if name.isdigit() else name
 
 
 def department_file_name(department):
+    """
+    Формирует безопасное имя файла для отчёта по цеху (без запрещённых символов).
+    """
     return BAD_NAME_CHARS.sub("-", padded_number(department))
 
 
 def department_report(department, moment=None, mode="turnout"):
+    """
+    Формирует Excel-отчёт по одному цеху в одном из режимов (REPORT_MODES):
+    шапка с датой, итоговые цифры (всего / сделано / процент) и список тех,
+    кто ещё не проголосовал / не выбрал способ.
+    """
     rule = REPORT_MODES[mode]
     moment = moment or timezone.localtime()
     people = Employee.objects.filter(department=department)
@@ -223,6 +286,7 @@ def department_report(department, moment=None, mode="turnout"):
 
     sheet.cell(7, 1, rule["list_title"]).font = bold
 
+    # Список тех, кто ещё не отметился
     row = 8
     for person in people.exclude(rule["done"]).order_by(
         "surname", "name", "patronymic"
@@ -235,6 +299,10 @@ def department_report(department, moment=None, mode="turnout"):
 
 
 def reports_archive(moment=None, mode="turnout"):
+    """
+    Собирает ZIP-архив из отчётов по каждому цеху (department_report).
+    Следит за уникальностью имён файлов внутри архива (при совпадении добавляет -2, -3...).
+    """
     moment = moment or timezone.localtime()
     departments = (
         Employee.objects.exclude(department="")
@@ -257,19 +325,30 @@ def reports_archive(moment=None, mode="turnout"):
     return archiver
 
 
+# Ширины колонок сводной таблицы по цехам
 SUMMARY_WIDTHS = (18, 16, 10, 10, 12, 12, 16, 10)
 
 
 def _by_number(value):
+    """
+    Ключ сортировки: числовые номера цехов идут первыми и по возрастанию числа,
+    остальные — следом в алфавитном порядке.
+    """
     name = (value or "").strip()
     return (0, int(name), "") if name.isdigit() else (1, 0, name)
 
 
+# Подпись для строк без привязки к производству
 NO_PRODUCTION = "Без производства"
+# Ширины колонок отчёта "Разделение по производствам"
 PRODUCTION_WIDTHS = (16, 14, 16, 10)
 
 
 def _share_row(sheet, line, label, people, came, bold=None):
+    """
+    Пишет строку отчёта по производствам: подразделение, всего, проголосовало, процент.
+    Возвращает номер следующей строки.
+    """
     cells = (
         sheet.cell(line, 1, label),
         sheet.cell(line, 2, people),
@@ -286,6 +365,11 @@ def _share_row(sheet, line, label, people, came, bold=None):
 
 
 def production_table():
+    """
+    Отчёт "Разделение по производствам (Голосование)":
+    цеха сгруппированы по производствам, для каждого — всего/проголосовало/процент,
+    под каждым производством строка "Итого", в конце строка "Всего".
+    """
     grouped = {}
     for row in (
         Employee.objects.exclude(department="")
@@ -348,10 +432,16 @@ def production_table():
     return book
 
 
+# Ширины колонок отчёта "Способы голосования по производствам"
 PRODUCTION_METHOD_WIDTHS = (16, 10, 10, 12, 10, 16, 20, 12)
 
 
 def _method_share_row(sheet, line, label, people, deg, uik, uvz, u19, bold=None):
+    """
+    Пишет строку отчёта по способам голосования: подразделение, всего людей,
+    counts по каждому способу, итого выбравших и процент.
+    Возвращает номер следующей строки.
+    """
     chosen = deg + uik + uvz + u19
     cells = (
         sheet.cell(line, 1, label),
@@ -372,11 +462,19 @@ def _method_share_row(sheet, line, label, people, deg, uik, uvz, u19, bold=None)
     return line + 1
 
 
-def production_method_table():
+def production_method_table(exclude_u19=False):
+    """
+    Отчёт "Способы голосования по производствам": цеха сгруппированы по производствам,
+    для каждого — количество людей и распределение по способам (ДЭГ, УИК, УВЗ, У19).
+    Если exclude_u19=True, из выборки исключаются сотрудники 19 округа.
+    """
+    queryset = Employee.objects.exclude(department="")
+    if exclude_u19:
+        queryset = queryset.exclude(okrug="19")
+
     grouped = {}
     for row in (
-        Employee.objects.exclude(department="")
-        .values("production", "department")
+        queryset.values("production", "department")
         .annotate(
             people=Count("id"),
             deg=Count("id", filter=Q(method=DEG)),
@@ -390,7 +488,9 @@ def production_method_table():
 
     book = openpyxl.Workbook()
     sheet = book.active
-    sheet.title = "Способы по производствам"
+    sheet.title = (
+        "Способы по производствам" if not exclude_u19 else "Способы (без 19)"
+    )[:31]
     for index, width in enumerate(PRODUCTION_METHOD_WIDTHS, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
 
@@ -471,6 +571,10 @@ def production_method_table():
 
 
 def summary_table(group_field="department", group_title="Подразделение"):
+    """
+    Сводная таблица по цехам: строка на цех — всего людей, планы по способам,
+    проголосовавшие и процент явки. Внизу строка "Итого".
+    """
     rows = sorted(
         Employee.objects.exclude(**{group_field: ""})
         .values(group_field)
@@ -553,6 +657,9 @@ def summary_table(group_field="department", group_title="Подразделен�
 
 
 def summary_table_no_u19(group_field="department", group_title="Подразделение"):
+    """
+    Та же сводная таблица по цехам, но без сотрудников 19 округа.
+    """
     rows = sorted(
         Employee.objects.exclude(**{group_field: ""})
         .exclude(okrug="19")
@@ -636,6 +743,11 @@ def summary_table_no_u19(group_field="department", group_title="Подразде
 
 
 def export_xlsx():
+    """
+    Полная выгрузка всех сотрудников в Excel: колонки из загрузки плюс
+    способ голосования (план), отметка явки и фактическое место голосования.
+    Читает базу итератором, чтобы не грузить всю таблицу в память.
+    """
     book = openpyxl.Workbook()
     sheet = book.active
     sheet.title = "Сотрудники"
@@ -647,4 +759,161 @@ def export_xlsx():
         row.append("да" if person.voted else "нет")
         row.append(METHOD_LABELS.get(person.voted_method, ""))
         sheet.append(row)
+    return book
+
+
+# ---------------------------------------------------------------------------
+# Сводный отчёт-конструктор (формируется по фильтрам из формы на странице export)
+# ---------------------------------------------------------------------------
+
+# Колонки сводного отчёта: (группа, подколонка, предикат от сотрудника).
+# Группа "" — одиночная колонка без подколонок (например "Не пойдет").
+# Вся семантика отчёта собрана здесь: если смысл колонки изменится,
+# достаточно поправить предикат в этом списке.
+# ВАЖНО: предикаты используют поля detached и not_going — они должны быть
+# добавлены в модель Employee (см. миграцию 0011).
+CUSTOM_COLUMNS = [
+    ("ДЭГ", "Планирует", lambda p: p.method == DEG),
+    ("ДЭГ", "Проголосовал", lambda p: p.voted and p.voted_method == DEG),
+    ("На участке", "Планирует", lambda p: p.method == UIK),
+    ("На участке", "Проголосовал", lambda p: p.voted and p.voted_method == UIK),
+    ("На участке УВЗ", "Планирует", lambda p: p.method == UVZ),
+    ("На участке УВЗ", "Проголосовал", lambda p: p.voted and p.voted_method == UVZ),
+    ("Не 19 округ", "Планирует", lambda p: p.okrug != "19" and bool(p.method)),
+    ("Не 19 округ", "Открепился", lambda p: p.okrug != "19" and p.detached),
+    ("Не 19 округ", "Проголосовал", lambda p: p.okrug != "19" and p.voted),
+    ("", "Не пойдет", lambda p: p.not_going),
+]
+
+
+def _custom_qs(params):
+    """
+    Строит QuerySet для сводного отчёта по параметрам формы-конструктора.
+    Поддерживает фильтры: производство, способ (план), цех, где голосовал,
+    округ (включая спецзначения "none" — пустой и "20+21" — оба округа) и УИК.
+    """
+    qs = Employee.objects.all()
+    production = (params.get("production") or "").strip()
+    dep = (params.get("dep") or "").strip()
+    method = (params.get("method") or "").strip()
+    where = (params.get("where") or "").strip()
+    okrug = (params.get("okrug") or "").strip()
+    uik = (params.get("uik") or "").strip()
+
+    if production:
+        qs = qs.filter(production=production)
+    if dep:
+        qs = qs.filter(department=dep)
+    if method == "none":
+        qs = qs.filter(method="")
+    elif method:
+        qs = qs.filter(method=method)
+    if where == "none":
+        qs = qs.filter(voted_method="")
+    elif where:
+        qs = qs.filter(voted_method=where)
+    if okrug == "none":
+        qs = qs.filter(okrug="")
+    elif okrug == "20+21":
+        qs = qs.filter(okrug__in=["20", "21"])
+    elif okrug:
+        qs = qs.filter(okrug=okrug)
+    if uik:
+        qs = qs.filter(uik=uik)
+    return qs
+
+
+def _custom_groups():
+    """
+    Группирует колонки CUSTOM_COLUMNS: [(имя группы, [(подколонка, предикат), ...]), ...].
+    Порядок групп и колонок сохраняется как в CUSTOM_COLUMNS.
+    """
+    groups = []
+    for group, sub, predicate in CUSTOM_COLUMNS:
+        if groups and groups[-1][0] == group:
+            groups[-1][1].append((sub, predicate))
+        else:
+            groups.append((group, [(sub, predicate)]))
+    return groups
+
+
+def custom_report(params):
+    """
+    Формирует сводный Excel-отчёт по сотрудникам на основе фильтров формы.
+    Структура как на макете: ведущие колонки (УИК, цех, таб.№, ФИО, округ),
+    затем группы способов с подколонками "Планирует/Проголосовал" (и "Открепился"
+    для "Не 19 округ"), одиночная колонка "Не пойдет" и строка ИТОГО внизу.
+    В ячейках ставится 1, если предикат колонки выполнен для сотрудника.
+    """
+    people = _custom_qs(params).order_by(
+        "uik", "department", "surname", "name", "patronymic"
+    )
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "Сводный отчёт"
+    bold = Font(bold=True)
+    centered = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    # Ведущие колонки: заголовок объединяет две строки шапки
+    column = 1
+    for title in ("Номер УИК", "Цех", "Таб.№", "ФИО", "Округ"):
+        sheet.merge_cells(
+            start_row=1, start_column=column, end_row=2, end_column=column
+        )
+        cell = sheet.cell(1, column, title)
+        cell.font = bold
+        cell.alignment = centered
+        column += 1
+
+    # Группы способов: имя группы в первой строке, подколонки во второй
+    predicates = []
+    for group, subs in _custom_groups():
+        start, end = column, column + len(subs) - 1
+        if group:
+            sheet.merge_cells(
+                start_row=1, start_column=start, end_row=1, end_column=end
+            )
+            head = sheet.cell(1, column, group)
+        else:
+            # Одиночная колонка без группы — заголовок на две строки
+            sheet.merge_cells(
+                start_row=1, start_column=start, end_row=2, end_column=end
+            )
+            head = sheet.cell(1, column, subs[0][0])
+        head.font = bold
+        head.alignment = centered
+        for sub, predicate in subs:
+            if group:
+                cell = sheet.cell(2, column, sub)
+                cell.font = bold
+                cell.alignment = centered
+            predicates.append(predicate)
+            column += 1
+
+    # Ширины колонок: 5 ведущих + по одной на каждый предикат
+    for index, width in enumerate((10, 8, 10, 42, 8) + (12,) * len(predicates), 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+
+    # Строки с данными (с 3-й строки листа) и параллельный подсчёт итогов
+    totals = [0] * len(predicates)
+    row = 3
+    for person in people.iterator(chunk_size=2000):
+        sheet.cell(row, 1, person.uik)
+        sheet.cell(row, 2, person.department)
+        sheet.cell(row, 3, person.tab_number)
+        sheet.cell(row, 4, person.fio)
+        sheet.cell(row, 5, person.okrug)
+        for offset, predicate in enumerate(predicates):
+            if predicate(person):
+                sheet.cell(row, 6 + offset, 1)
+                totals[offset] += 1
+        row += 1
+
+    # Строка ИТОГО с суммами по каждой колонке-предикату
+    sheet.cell(row, 1, "ИТОГО").font = bold
+    for offset, total in enumerate(totals):
+        cell = sheet.cell(row, 6 + offset, total)
+        cell.font = bold
+        cell.alignment = centered
     return book

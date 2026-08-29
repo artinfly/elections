@@ -1,19 +1,23 @@
+/* ============================================================
+   Дизайн-токены: цвета и поверхности, используются во всех стилях
+   ============================================================ */
 :root {
-    --orange: #e07b2a;
-    --orange-dark: #c96a1e;
-    --orange-soft: #f5e6d6;
-    --sidebar-bg: #1e1e1e;
-    --sidebar-sec: #272727;
-    --header-bg: #2e2e2e;
-    --total-bg: #fde9d4;
-    --border: #e8e8e8;
-    --text: #1e1e1e;
-    --text-muted: #888;
-    --surface: #fff;
+    --orange: #e07b2a;          /* основной акцентный цвет */
+    --orange-dark: #c96a1e;     /* акцент при наведении */
+    --orange-soft: #f5e6d6;     /* светлая подложка (линия под шапкой страницы) */
+    --sidebar-bg: #1e1e1e;      /* фон сайдбара */
+    --sidebar-sec: #272727;     /* фон активного пункта меню */
+    --header-bg: #2e2e2e;       /* фон шапок таблиц */
+    --total-bg: #fde9d4;        /* фон итоговых строк */
+    --border: #e8e8e8;          /* основные границы */
+    --text: #1e1e1e;            /* основной текст */
+    --text-muted: #888;         /* приглушённый текст (подписи, подсказки) */
+    --surface: #fff;            /* фон карточек */
     --text-primary: var(--text);
     --text-secondary: var(--text-muted);
 }
 
+/* Базовая раскладка: border-box для всех элементов */
 *, *::before, *::after { box-sizing: border-box; }
 
 body {
@@ -24,6 +28,9 @@ body {
     margin: 0;
 }
 
+/* ============================================================
+   Сайдбар: фиксированная левая панель навигации
+   ============================================================ */
 .sidebar {
     position: fixed; top: 0; left: 0;
     height: 100vh; width: 240px;
@@ -36,6 +43,7 @@ body {
 .sidebar::-webkit-scrollbar { width: 4px; }
 .sidebar::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
 
+/* Логотип системы вверху сайдбара */
 .sidebar-logo {
     padding: 1rem 1.1rem 0.85rem;
     border-bottom: 1px solid #333;
@@ -54,6 +62,7 @@ body {
 }
 .sidebar-logo-text span { display: block; font-weight: 400; color: #777; font-size: 0.72rem; }
 
+/* Кнопка выхода прижата к низу сайдбара */
 .sidebar-logout {
     margin-top: auto; padding: 0.75rem 1.1rem;
     border-top: 1px solid #333;
@@ -65,6 +74,7 @@ body {
 }
 .sidebar-logout a:hover { color: #fff; }
 
+/* Заголовок раздела меню (мелкий капс) */
 .nav-section {
     padding: 0.9rem 1.1rem 0.25rem;
     font-size: 0.64rem; font-weight: 700;
@@ -72,6 +82,7 @@ body {
     color: #555;
 }
 
+/* Пункты меню: активный подсвечивается оранжевой полосой слева */
 .nav-link {
     display: flex; align-items: center; gap: 0.4rem;
     padding: 0.3rem 1.1rem;
@@ -87,14 +98,19 @@ body {
     border-left-color: var(--orange);
 }
 
+/* ============================================================
+   Основная область справа от сайдбара
+   ============================================================ */
 .main-content {
     margin-left: 240px; padding: 1.5rem 1.75rem;
     height: 100vh; overflow-x: hidden; overflow-y: auto;
     display: flex; flex-direction: column;
 }
 .main-content > * { flex: 0 0 auto; min-width: 0; }
+/* Таблица со списками растягивается и занимает свободное место */
 .main-content > .table-container { flex: 1 1 auto; min-height: 140px; max-height: none; }
 
+/* Шапка страницы: липнет к верху при прокрутке */
 .page-header {
     display: flex; align-items: center; justify-content: space-between;
     margin-bottom: 1.25rem; padding-bottom: 0.75rem;
@@ -108,11 +124,15 @@ body {
 }
 .page-header h5 { margin: 0; font-size: 1rem; font-weight: 700; color: var(--text); }
 
+/* ============================================================
+   Панель фильтров
+   ============================================================ */
 .filter-panel {
     background: #fff; border: 1px solid var(--border);
     border-radius: 8px; padding: 0.85rem 1.1rem;
     box-shadow: 0 1px 4px rgba(0,0,0,0.04);
 }
+/* Группа "подпись + поле" в столбик */
 .filter-group { display: flex; flex-direction: column; gap: 0.2rem; }
 .filter-label {
     font-size: 0.67rem; font-weight: 700;
@@ -127,6 +147,7 @@ body {
     outline: none; transition: border-color 0.15s, box-shadow 0.15s;
 }
 .filter-input { width: 200px; }
+/* Растягивающаяся группа поиска */
 .filter-group.grow { flex: 1 1 280px; min-width: 220px; }
 .filter-group.grow .filter-input { width: 100%; }
 .filter-select { width: 110px; }
@@ -135,6 +156,10 @@ body {
     box-shadow: 0 0 0 3px rgba(224,123,42,0.12);
 }
 
+/* ============================================================
+   Кнопки
+   ============================================================ */
+/* Основная оранжевая кнопка действий */
 .btn-orange {
     background: var(--orange); color: #fff;
     border: none; border-radius: 5px;
@@ -144,6 +169,7 @@ body {
 }
 .btn-orange:hover { background: var(--orange-dark); }
 
+/* Нейтральная кнопка с рамкой (сброс, вторичные действия) */
 .btn-ghost {
     background: #fff; color: #555;
     border: 1px solid #ddd; border-radius: 5px;
@@ -153,6 +179,9 @@ body {
 }
 .btn-ghost:hover { border-color: var(--orange); color: var(--orange); }
 
+/* ============================================================
+   Таблицы отчётов: контейнер со скроллом и липкой шапкой
+   ============================================================ */
 .table-container {
     background: #fff; border-radius: 8px;
     box-shadow: 0 1px 4px rgba(0,0,0,0.06);
@@ -176,6 +205,7 @@ body {
     border-bottom: 1px solid #f0f0f0;
     border-right: 1px solid #f5f5f5;
 }
+/* Колонка ФИО: переносы вместо бесконечной ширины */
 .report-table tbody td.wrap {
     white-space: normal; word-break: break-word;
     line-height: 1.4; min-width: 160px; max-width: 520px;
@@ -183,6 +213,9 @@ body {
 .report-table tbody td:last-child { border-right: none; }
 .report-table tbody tr:hover td { background: #fafafa; }
 
+/* ============================================================
+   Пагинация и мелкие подписи
+   ============================================================ */
 .pgn-btn {
     border: 1px solid #ddd; background: #fff;
     border-radius: 4px; padding: 0.18rem 0.55rem;
@@ -194,6 +227,9 @@ body {
 .pgn-active { background: var(--orange) !important; color: #fff !important; border-color: var(--orange) !important; }
 .row-count-label { font-size: 0.75rem; color: var(--text-muted); }
 
+/* ============================================================
+   Страница входа
+   ============================================================ */
 .login-wrap {
     width: 100%; max-width: 360px; padding: 1rem;
 }
@@ -203,6 +239,7 @@ body {
     box-shadow: 0 4px 20px rgba(0,0,0,0.08);
     overflow: hidden;
 }
+/* Тёмная шапка карточки с логотипом */
 .login-top {
     background: #1e1e1e;
     padding: 1.5rem 2rem 1.25rem;
@@ -253,6 +290,7 @@ body {
     text-align: center; padding: 0.75rem;
     border-top: 1px solid #f0f0f0;
 }
+/* Центрирование карточки входа на весь экран */
 body.login-page {
     display: flex;
     align-items: center;
@@ -260,6 +298,10 @@ body.login-page {
     min-height: 100vh;
 }
 
+/* ============================================================
+   Карточки и дашборд-счётчики
+   ============================================================ */
+/* Универсальная белая карточка (отчёты, загрузка, конструктор) */
 .card-block {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -268,6 +310,7 @@ body.login-page {
     box-shadow: 0 1px 3px rgba(0,0,0,.06);
     transition: box-shadow .15s;
 }
+/* Ряд карточек-счётчиков: растягиваются поровну, переносятся на узких экранах */
 .dash-row {
     display: flex;
     flex-wrap: wrap;
@@ -294,6 +337,7 @@ body.login-page {
 @media (max-width: 576px) {
     .dash-row > a, .dash-row > div { flex-basis: 100%; }
 }
+/* Карточка-счётчик: иконка + число + подпись */
 .dash-card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -330,6 +374,7 @@ body.login-page {
     margin-top: 2px;
 }
 
+/* Заголовок блока внутри карточки (мелкий капс) */
 .block-title {
     font-size: 12px;
     text-transform: uppercase;
@@ -338,4 +383,3 @@ body.login-page {
     margin: 0 0 6px 2px;
 }
 .card-block + .block-title { margin-top: 18px; }
-

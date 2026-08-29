@@ -1,18 +1,23 @@
 {% extends "base.html" %}
 {% block title %}Способ голосования{% endblock %}
 {% block content %}
+{# Шапка страницы: заголовок и число найденных по текущим фильтрам #}
 <div class="page-header">
     <h5>Способ голосования</h5>
     <span class="row-count-label">Найдено: {{ found }}</span>
 </div>
 
+{% comment %} {# Карточки-счётчики по запланированным способам голосования.
+  Значения берутся из counts.method (план), обновляются JS после каждого клика. #} {% endcomment %}
 <div class="dash-row mb-4">
+    {# ДЭГ #}
     <div>
         <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(37,99,235,.12);color:#2563eb">Д</div>
             <div><div class="dash-card-num">{{ counts.method.deg }}</div><div class="dash-card-lbl">ДЭГ</div></div>
         </div>
     </div>
+    {# УИК: карточка-кнопка, по клику открывает модалку с разбивкой по участкам (app.js) #}
     <div>
         <button type="button" class="dash-card dash-card-action" id="uik-card"
                 title="Показать распределение по участкам">
@@ -20,24 +25,28 @@
             <div><div class="dash-card-num">{{ counts.method.uik }}</div><div class="dash-card-lbl">УИК<span class="dash-card-more">по участкам</span></div></div>
         </button>
     </div>
+    {# УИК-УВЗ #}
     <div>
         <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(235,104,52,.12);color:#eb6834">В</div>
             <div><div class="dash-card-num">{{ counts.method.uvz }}</div><div class="dash-card-lbl">УИК-УВЗ</div></div>
         </div>
     </div>
+    {# УИК-19: план, как и остальные карточки страницы (counts.method, не voted!) #}
     <div>
         <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(124,58,237,.12);color:#7c3aed">19</div>
-            <div><div class="dash-card-num">{{ counts.voted.u19 }}</div><div class="dash-card-lbl">УИК-19</div></div>
+            <div><div class="dash-card-num">{{ counts.method.u19 }}</div><div class="dash-card-lbl">УИК-19</div></div>
         </div>
     </div>
+    {# Способ ещё не назначен #}
     <div>
         <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(136,136,136,.12);color:#888">—</div>
             <div><div class="dash-card-num">{{ counts.method.none }}</div><div class="dash-card-lbl">Не назначен</div></div>
         </div>
     </div>
+    {# Всего сотрудников в текущей выборке #}
     <div>
         <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(224,123,42,.12);color:#e07b2a">Σ</div>
@@ -46,8 +55,10 @@
     </div>
 </div>
 
+{# Панель фильтров (общая для страниц списков) #}
 {% include "_filters.html" %}
 
+{# Таблица сотрудников с переключателем способа голосования в каждой строке #}
 <div class="table-container">
 <table class="report-table">
     <thead><tr><th>Цех</th><th>Таб№</th><th>ФИО</th><th>Округ</th><th>УИК</th><th class="col-method">Способ</th></tr></thead>
@@ -60,6 +71,8 @@
             <td>{{ r.okrug }}</td>
             <td>{{ r.uik }}</td>
             <td class="col-method">
+                {% comment %} {# Сегмент-переключатель: data-id — ID сотрудника,
+                   кнопки data-m — коды способов. Активная кнопка с классом "on". #} {% endcomment %}
                 <span class="seg seg-method" data-id="{{ r.id }}">
                     {% for code, label in methods %}
                     <button type="button" data-m="{{ code }}" class="{% if r.method == code %}on{% endif %}">{{ label }}</button>
@@ -73,22 +86,30 @@
     </tbody>
 </table>
 </div>
+{# Пагинация списка #}
 {% include "_pagination.html" %}
 {% endblock %}
 
 {% block scripts %}
 <script>
+// Обработка кликов по переключателям способа голосования.
+// Клик по активной кнопке сбрасывает способ (method=''),
+// клик по неактивной — назначает выбранный способ.
 document.querySelectorAll('.seg').forEach(function (seg) {
     seg.addEventListener('click', function (e) {
         var btn = e.target.closest('button');
         if (!btn) return;
         var on = btn.classList.contains('on');
+        // Сохраняем на сервере; сервер вернёт свежие счётчики по тем же фильтрам
         postJSON('/api/method/', {
             id: seg.dataset.id,
             method: on ? '' : btn.dataset.m
         }).then(function (c) {
+            // Перерисовываем активную кнопку в строке
             seg.querySelectorAll('button').forEach(function (b) { b.classList.remove('on'); });
             if (!on) btn.classList.add('on');
+            // Обновляем карточки-счётчики сверху (порядок .dash-card-num в DOM):
+            // 0=ДЭГ, 1=УИК, 2=УВЗ, 3=УИК-19, 4=Не назначен
             var n = document.querySelectorAll('.dash-card-num');
             n[0].textContent = c.method.deg;
             n[1].textContent = c.method.uik;

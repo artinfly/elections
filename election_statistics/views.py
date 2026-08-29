@@ -12,6 +12,7 @@ from django.views.decorators.http import require_POST
 from .models import DEG, METHOD_LABELS, METHODS, UIK, UIK19, UVZ, Employee
 from .services import (
     COLUMNS,
+    custom_report,
     export_xlsx,
     import_base,
     mark_voted,
@@ -23,18 +24,44 @@ from .services import (
     summary_table_no_u19,
 )
 
+# Количество сотрудников на одной странице пагинации
 PER_PAGE = 100
+
+# Опции для селекта "Округ" в форме конструктора сводного отчёта
+CUSTOM_OKRUG_OPTIONS = [
+    ("", "Все"),
+    ("none", "Пусто"),
+    ("19", "19"),
+    ("20", "20"),
+    ("21", "21"),
+    ("20+21", "20+21"),
+]
 
 
 def is_operator(user):
+    """
+    Проверяет, является ли пользователь оператором.
+    Оператор — это суперюзер или пользователь, входящий в группу 'operator'.
+    Операторы имеют доступ к загрузке базы и другим расширенным функциям.
+    """
     return user.is_superuser or user.groups.filter(name="operator").exists()
 
 
 def _known_method(value):
+    """
+    Валидирует значение способа голосования.
+    Возвращает код способа, если он есть в справочнике METHOD_LABELS, иначе пустую строку.
+    Защищает от записи невалидных данных с фронтенда.
+    """
     return value if value in METHOD_LABELS else ""
 
 
 def _body(request):
+    """
+    Безопасно парсит JSON из тела POST-запроса.
+    Возвращает кортеж (данные, HttpResponse с ошибкой).
+    Если парсинг успешен, ошибка равна None.
+    """
     try:
         return json.loads(request.body or "{}"), None
     except ValueError:
@@ -42,6 +69,10 @@ def _body(request):
 
 
 def _pk(value):
+    """
+    Безопасно преобразует переданное значение (обычно строку) в int для поиска по ID.
+    Возвращает None, если преобразование невозможно.
+    """
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -49,6 +80,11 @@ def _pk(value):
 
 
 def login_view(request):
+    """
+    Отображает форму входа и обрабатывает попытку авторизации.
+    Если пользователь уже авторизован, редиректит на главную страницу (method).
+    После успешного входа также редиректит на главную.
+    """
     if request.user.is_authenticated:
         return redirect("method")
     error = False
@@ -66,11 +102,25 @@ def login_view(request):
 
 
 def logout_view(request):
+    """
+    Разлогинивает пользователя и возвращает его на страницу входа.
+    """
     logout(request)
     return redirect("login")
 
 
 def _filtered(params):
+    """
+    Строит QuerySet сотрудников на основе параметров фильтрации.
+    params — словарь (обычно request.GET), содержащий параметры:
+    - q: поиск по табельному номеру или ФИО
+    - dep: фильтр по цеху (подразделению)
+    - okrug: фильтр по округу (поддерживает 'none' для пустых значений)
+    - uik: фильтр по номеру УИК
+    - method: фильтр по запланированному способу голосования (поддерживает 'none')
+    - where: фильтр по фактическому месту голосования (поддерживает 'none')
+    - voted: фильтр по явке ('yes' или 'no')
+    """
     qs = Employee.objects.all()
     search = (params.get("q") or "").strip()
     dep = (params.get("dep") or "").strip()
@@ -80,6 +130,7 @@ def _filtered(params):
     where = (params.get("where") or "").strip()
     voted = (params.get("voted") or "").strip()
 
+    # Поиск по словам (каждое слово ищется отдельно в tab_number, surname, name, patronymic)
     for part in search.split():
         qs = qs.filter(
             Q(tab_number__icontains=part)
@@ -111,6 +162,13 @@ def _filtered(params):
 
 
 def _counts(qs=None):
+    """
+    Считает агрегированную статистику по базе или переданному QuerySet.
+    Возвращает словарь с тремя блоками:
+    - method: сколько человек запланировали каждый способ голосования
+    - voted: сколько человек фактически проголосовали каждым способом (только те, у кого voted=True)
+    - no_uik: количество сотрудников без привязки к УИК
+    """
     base = qs if qs is not None else Employee.objects.all()
     agg = base.aggregate(
         deg=Count("id", filter=Q(method=DEG)),
@@ -124,7 +182,7 @@ def _counts(qs=None):
         deg=Count("id", filter=Q(voted_method=DEG)),
         uik=Count("id", filter=Q(voted_method=UIK)),
         uvz=Count("id", filter=Q(voted_method=UVZ)),
-        u19=Count("id", filter=Q(method=UIK19)),
+        u19=Count("id", filter=Q(voted_method=UIK19)),
         none=Count("id", filter=Q(voted_method="")),
         total=Count("id"),
     )
@@ -136,7 +194,11 @@ def _counts(qs=None):
 
 
 def _page_window(page, size=5):
-    """Номера страниц вокруг текущей, всего не больше size."""
+    """
+    Вычисляет диапазон номеров страниц для пагинатора.
+    Возвращает "окно" страниц размером size вокруг текущей страницы.
+    Если страниц меньше size, возвращает все страницы.
+    """
     total = page.paginator.num_pages
     current = page.number
     if total <= size:
@@ -144,6 +206,7 @@ def _page_window(page, size=5):
     half = size // 2
     start = current - half
     end = current + half
+    # Сдвигаем окно, если выходим за границы
     if start < 1:
         start, end = 1, size
     if end > total:
@@ -152,6 +215,11 @@ def _page_window(page, size=5):
 
 
 def _context(request):
+    """
+    Готовит общий контекст для страниц со списками сотрудников (method, elections).
+    Включает в себя пагинацию, отфильтрованные данные, счетчики статистики
+    и справочники для выпадающих списков фильтров.
+    """
     qs = _filtered(request.GET)
     page = Paginator(qs, PER_PAGE).get_page(request.GET.get("page"))
     params = request.GET.copy()
@@ -183,16 +251,26 @@ def _context(request):
 
 @login_required
 def method_page(request):
+    """
+    Страница со списком сотрудников для простановки способа голосования.
+    """
     return render(request, "method.html", _context(request))
 
 
 @login_required
 def elections_page(request):
+    """
+    Страница со списком сотрудников для отметки явки (голосования).
+    """
     return render(request, "elections.html", _context(request))
 
 
 @login_required
 def upload_page(request):
+    """
+    Страница загрузки базы сотрудников из Excel-файла.
+    Доступна только пользователям с правами оператора (is_operator).
+    """
     if not is_operator(request.user):
         return render(request, "access_denied.html", {"is_operator": False})
     return render(
@@ -210,6 +288,10 @@ def upload_page(request):
 @login_required
 @require_POST
 def upload_base(request):
+    """
+    Обработчик POST-запроса с Excel-файлом для импорта/обновления базы сотрудников.
+    Вызывает функцию import_base из services.py и сохраняет результат в сессию.
+    """
     if not is_operator(request.user):
         return JsonResponse({"error": "нет прав на загрузку файлов"}, status=403)
     upload = request.FILES.get("file")
@@ -229,6 +311,10 @@ def upload_base(request):
 @login_required
 @require_POST
 def api_method(request):
+    """
+    API эндпоинт для обновления способа голосования одного сотрудника.
+    Принимает JSON: {"id": ..., "method": ..., "filters": {...}}
+    """
     data, bad = _body(request)
     if bad:
         return bad
@@ -237,12 +323,17 @@ def api_method(request):
     )
     if not changed:
         return JsonResponse({"error": "работник не найден"}, status=404)
+    # Возвращаем обновленную статистику с учетом текущих фильтров
     return JsonResponse(_counts(_filtered(data.get("filters") or {})))
 
 
 @login_required
 @require_POST
 def api_voted(request):
+    """
+    API эндпоинт для отметки явки одного сотрудника.
+    Принимает JSON: {"id": ..., "voted": true/false, "filters": {...}}
+    """
     data, bad = _body(request)
     if bad:
         return bad
@@ -262,6 +353,11 @@ def api_voted(request):
 @login_required
 @require_POST
 def api_bulk_voted(request):
+    """
+    API эндпоинт для массовой отметки явки.
+    Применяет действие (voted=true/false) ко всем сотрудникам, попадающим под filters.
+    Принимает JSON: {"voted": true/false, "filters": {...}}
+    """
     data, bad = _body(request)
     if bad:
         return bad
@@ -269,6 +365,7 @@ def api_bulk_voted(request):
     filters = data.get("filters") or {}
     target = _filtered(filters)
     skipped = 0
+    # При отметке явки пропускаем тех, у кого не выбран способ голосования
     if voted:
         skipped = target.filter(method="").count()
         target = target.exclude(method="")
@@ -281,6 +378,10 @@ def api_bulk_voted(request):
 
 @login_required
 def api_uik_stats(request):
+    """
+    API эндпоинт для получения статистики по УИКам (используется в модальном окне).
+    Группирует сотрудников по УИК и считает количество людей и явку.
+    """
     rows = (
         _filtered(request.GET)
         .values("uik")
@@ -294,6 +395,10 @@ def api_uik_stats(request):
 
 @login_required
 def export_page(request):
+    """
+    Страница со списком доступных отчётов и формой конструктора сводного отчёта.
+    Передает в контекст счетчики цехов/производств и справочники для формы конструктора.
+    """
     departments_count = (
         Employee.objects.exclude(department="").values("department").distinct().count()
     )
@@ -309,12 +414,30 @@ def export_page(request):
             "departments_count": departments_count,
             "productions_count": productions_count,
             "msg": request.session.pop("msg", ""),
+            # Справочники для формы конструктора сводного отчёта
+            "productions": Employee.objects.exclude(production="")
+            .values_list("production", flat=True)
+            .distinct()
+            .order_by("production"),
+            "departments": Employee.objects.exclude(department="")
+            .values_list("department", flat=True)
+            .distinct()
+            .order_by("department"),
+            "methods": METHODS,
+            "uiks": Employee.objects.exclude(uik="")
+            .values_list("uik", flat=True)
+            .distinct()
+            .order_by("uik"),
+            "custom_okrugs": CUSTOM_OKRUG_OPTIONS,
         },
     )
 
 
 @login_required
 def export_summary(request):
+    """
+    Генерация и отдача Excel-отчета "Сводная таблица по цехам".
+    """
     book = summary_table()
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -327,6 +450,9 @@ def export_summary(request):
 
 @login_required
 def export_summary_no_19(request):
+    """
+    Генерация и отдача Excel-отчета "Сводная таблица по цехам (Без 19 округа)".
+    """
     book = summary_table_no_u19()
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -339,6 +465,9 @@ def export_summary_no_19(request):
 
 @login_required
 def export_productions(request):
+    """
+    Генерация и отдача Excel-отчета "Разделение по производствам (Голосование)".
+    """
     book = production_table()
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -351,6 +480,9 @@ def export_productions(request):
 
 @login_required
 def export_employees(request):
+    """
+    Генерация и отдача полного Excel-отчета со всеми сотрудниками ("Полная таблица").
+    """
     book = export_xlsx()
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -361,6 +493,11 @@ def export_employees(request):
 
 
 def _archive_response(request, mode, prefix):
+    """
+    Вспомогательная функция для генерации ZIP-архивов с отчетами по каждому цеху.
+    mode: 'turnout' (явка) или 'method' (способы голосования)
+    prefix: префикс имени файла (yavka или sposob)
+    """
     moment = timezone.localtime()
     archiver = reports_archive(moment, mode)
     if not archiver.file_count:
@@ -374,6 +511,9 @@ def _archive_response(request, mode, prefix):
 
 @login_required
 def export_production_methods(request):
+    """
+    Генерация и отдача Excel-отчета "Способы голосования по производствам".
+    """
     book = production_method_table()
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -385,10 +525,47 @@ def export_production_methods(request):
 
 
 @login_required
+def export_production_methods_no_19(request):
+    """
+    Генерация и отдача Excel-отчета "Способы голосования по производствам (Без 19 округа)".
+    """
+    book = production_method_table(exclude_u19=True)
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    name = f"sposoby_po_proizvodstvam_bez_u19_{timezone.localtime():%Y%m%d_%H%M}.xlsx"
+    response["Content-Disposition"] = f'attachment; filename="{name}"'
+    book.save(response)
+    return response
+
+
+@login_required
 def export_archive(request):
+    """
+    Генерация и отдача ZIP-архива с отчетами по явке для каждого цеха.
+    """
     return _archive_response(request, "turnout", "yavka")
 
 
 @login_required
 def export_method_archive(request):
+    """
+    Генерация и отдача ZIP-архива с отчетами по способам голосования для каждого цеха.
+    """
     return _archive_response(request, "method", "sposob")
+
+
+@login_required
+def export_custom_report(request):
+    """
+    Генерация и отдача сводного отчета по сотрудникам на основе фильтров из формы.
+    Фильтры передаются через GET-параметры и обрабатываются в custom_report (services.py).
+    """
+    book = custom_report(request.GET)
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    name = f"svodny_otchet_{timezone.localtime():%Y%m%d_%H%M}.xlsx"
+    response["Content-Disposition"] = f'attachment; filename="{name}"'
+    book.save(response)
+    return response

@@ -1,22 +1,28 @@
 {% extends "base.html" %}
 {% block title %}Загрузка данных{% endblock %}
 {% block content %}
+{# Шапка страницы: заголовок и общее число работников в базе #}
 <div class="page-header">
     <h5>Загрузка данных</h5>
     <span class="row-count-label">в базе работников: {{ counts.method.total }}</span>
 </div>
 
+{# Сообщение об итогах предыдущей загрузки (сколько создано/обновлено строк) #}
 {% if msg %}<div class="ok-msg mb-3">{{ msg }}</div>{% endif %}
 
 <div class="narrow">
+    {% comment %} {# Карточка загрузки: форма с файлом, уходит на upload_base.
+      onsubmit вызывает checkFile() — клиентскую проверку перед отправкой. #} {% endcomment %}
     <div class="card-block">
         <form method="post" action="{% url 'upload_base' %}" enctype="multipart/form-data"
               onsubmit="return checkFile()">
             {% csrf_token %}
             <div class="file-row">
+                {# accept=".xlsx" — подсказка браузеру, основная проверка всё равно в JS и на сервере #}
                 <input type="file" name="file" accept=".xlsx" class="form-control form-control-sm">
                 <button class="btn-orange" type="submit" id="upload-btn">Загрузить</button>
             </div>
+            {# Памятка по формату: почему не подходит старый .xls и как пересохранить #}
             <div class="fmt-line">
                 <span class="fmt-badge">XLSX</span>
                 <span>
@@ -25,13 +31,17 @@
                     «Сохранить как → Книга Excel (*.xlsx)».
                 </span>
             </div>
+            {% comment %} {# Индикатор разбора файла: показывается после успешной проверки,
+              чтобы пользователь не дёргал кнопку повторно #} {% endcomment %}
             <div id="upload-progress" class="hint" style="display:none">
                 Идёт разбор файла, подождите...
             </div>
+            {# Блок для текста клиентской ошибки (нет файла / не то расширение) #}
             <div id="file-error" class="err-msg mt-2" style="display:none"></div>
         </form>
     </div>
 
+    {# Карточка-справка: какие колонки ожидает файл импорта #}
     <div class="card-block">
         <div class="block-title">Колонки файла</div>
         <div class="chip-grid">
@@ -48,22 +58,34 @@
 
 {% block scripts %}
 <script>
+// Клиентская проверка файла перед отправкой формы.
+// Возвращает false (отмена submit), если файл не прикреплён или расширение не .xlsx;
+// иначе блокирует кнопку, показывает индикатор разбора и разрешает отправку.
 function checkFile() {
     var input = document.querySelector('input[name="file"]');
     var err = document.getElementById('file-error');
+
+    // Показывает текст ошибки и отменяет отправку формы
     function fail(text) {
         err.textContent = text;
         err.style.display = 'block';
         return false;
     }
+
+    // Файл вообще не выбран
     if (!input.files || !input.files.length) {
         return fail('Файл не прикреплён — выберите .xlsx перед загрузкой');
     }
+
+    // Проверка расширения: принимаем только .xlsx
     var name = input.files[0].name;
     if (!name.toLowerCase().endsWith('.xlsx')) {
         var ext = name.indexOf('.') >= 0 ? name.slice(name.lastIndexOf('.')) : 'без расширения';
         return fail('Это ' + ext + ', а нужен .xlsx — пересохраните файл в Excel');
     }
+
+    // Всё в порядке: гасим ошибку, блокируем кнопку от повторных нажатий
+    // и показываем индикатор разбора файла
     err.style.display = 'none';
     var btn = document.getElementById('upload-btn');
     btn.disabled = true;

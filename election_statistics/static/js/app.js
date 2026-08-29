@@ -1,9 +1,12 @@
 (function () {
     "use strict";
 
+    // CSRF-токен читается из скрытой формы #csrf-holder в base.html
+    // и подставляется в заголовок X-CSRFToken у всех POST-запросов к API
     var field = document.querySelector('input[name="csrfmiddlewaretoken"]');
     var token = field ? field.value : "";
 
+    // Показывает сообщение в общем блоке ошибок #app-error (под шапкой страницы)
     function show(message) {
         var box = document.getElementById("app-error");
         if (!box) return;
@@ -11,6 +14,9 @@
         box.style.display = "block";
     }
 
+    // Собирает текущие фильтры из адресной строки (все GET-параметры кроме page).
+    // Используются, чтобы после изменения данных сервер пересчитал счётчики
+    // по той же выборке, которую видит пользователь.
     window.currentFilters = function () {
         var filters = {};
         new URLSearchParams(window.location.search).forEach(function (value, key) {
@@ -19,6 +25,9 @@
         return filters;
     };
 
+    // Универсальный POST-запрос к API с JSON-телом и CSRF-заголовком.
+    // Автоматически добавляет текущие фильтры, если они не переданы явно.
+    // При ошибке показывает сообщение и пробрасывает исключение дальше.
     window.postJSON = function (url, data) {
         data.filters = data.filters || window.currentFilters();
         return fetch(url, {
@@ -41,23 +50,31 @@
             });
     };
 
+    // ---------- Модальное окно "Люди по участкам" ----------
+    // Окно и карточка-кнопка есть только на страницах method/elections;
+    // на остальных страницах скрипт дальше не работает.
     var modal = document.getElementById("uik-modal");
     var card = document.getElementById("uik-card");
     if (!modal || !card) return;
 
     var body = document.getElementById("uik-modal-body");
     var sub = document.getElementById("uik-modal-sub");
+    // data-turnout="1" (страница elections) включает колонки явки в таблице модалки
     var withTurnout = card.dataset.turnout === "1";
 
+    // Скрывает модальное окно
     function close() {
         modal.hidden = true;
     }
 
+    // Экранирует HTML в данных из API, чтобы нельзя было внедрить разметку
     function escape(value) {
         return String(value === null || value === undefined ? "" : value)
             .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 
+    // Рисует таблицу участков: УИК, человек (и явка с процентом, если withTurnout).
+    // Внизу добавляет строку "Итого" с суммами и общим процентом.
     function render(rows) {
         if (!rows.length) {
             body.innerHTML = '<div class="modal-empty">Нет данных</div>';
@@ -92,6 +109,8 @@
         sub.textContent = "участков: " + rows.length + ", человек: " + people;
     }
 
+    // Клик по карточке УИК: открывает окно и тянет статистику из /api/uik-stats/
+    // с теми же фильтрами, что применены на странице
     card.addEventListener("click", function () {
         modal.hidden = false;
         body.innerHTML = '<div class="modal-empty">Загрузка...</div>';
@@ -109,6 +128,7 @@
             });
     });
 
+    // Закрытие окна: кнопка-крестик, клик по фону вокруг окна, клавиша Escape
     document.getElementById("uik-modal-close").addEventListener("click", close);
     modal.addEventListener("click", function (e) {
         if (e.target === modal) close();

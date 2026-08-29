@@ -1,10 +1,15 @@
+{% comment %} {# Общая панель фильтров для страниц со списками (method, elections).
+  Отправляется GET-ом на текущую страницу, выбранные значения сохраняются
+  через selected/{{ f.* }}, чтобы фильтры не сбрасывались после поиска. #} {% endcomment %}
 <div class="filter-panel mb-3">
     <form method="get">
         <div class="d-flex flex-wrap gap-3 align-items-end">
+            {# Текстовый поиск: табельный номер или ФИО (каждое слово ищется отдельно) #}
             <div class="filter-group grow">
                 <label class="filter-label">Поиск</label>
                 <input class="filter-input" type="text" name="q" value="{{ f.q }}" placeholder="Табельный номер или ФИО">
             </div>
+            {# Фильтр по цеху (подразделению) #}
             <div class="filter-group">
                 <label class="filter-label">Цех</label>
                 <select class="filter-select" name="dep">
@@ -12,6 +17,7 @@
                     {% for d in departments %}<option value="{{ d }}" {% if d == f.dep %}selected{% endif %}>{{ d }}</option>{% endfor %}
                 </select>
             </div>
+            {# Фильтр по округу: "Пусто" — сотрудники без округа, остальные — из справочника #}
             <div class="filter-group">
                 <label class="filter-label">Округ</label>
                 <select class="filter-select" name="okrug">
@@ -20,6 +26,7 @@
                     {% for o in okrugs %}<option value="{{ o }}" {% if o == f.okrug %}selected{% endif %}>{{ o }}</option>{% endfor %}
                 </select>
             </div>
+            {# Фильтр по номеру УИК #}
             <div class="filter-group">
                 <label class="filter-label">УИК</label>
                 <select class="filter-select" name="uik">
@@ -27,6 +34,7 @@
                     {% for u in uiks %}<option value="{{ u }}" {% if u == f.uik %}selected{% endif %}>{{ u }}</option>{% endfor %}
                 </select>
             </div>
+            {# Режим без явки (страница "Способ голосования"): фильтр по запланированному способу #}
             {% if not with_status %}
             <div class="filter-group">
                 <label class="filter-label">Способ</label>
@@ -37,6 +45,7 @@
                 </select>
             </div>
             {% endif %}
+            {# Режим с явкой (страница "Голосование"): фильтры по явке и фактическому месту #}
             {% if with_status %}
             <div class="filter-group">
                 <label class="filter-label">Явка</label>
@@ -55,9 +64,11 @@
                 </select>
             </div>
             {% endif %}
+            {# Применение фильтров #}
             <div class="filter-group">
                 <button class="btn-orange" type="submit">Найти</button>
             </div>
+            {# Сброс: ссылка на тот же путь без параметров GET #}
             <div class="filter-group">
                 <a class="btn-ghost" href="{{ request.path }}">Сбросить</a>
             </div>
