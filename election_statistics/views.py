@@ -12,6 +12,7 @@ from django.views.decorators.http import require_POST
 from .models import DEG, METHOD_LABELS, METHODS, UIK, UIK19, UVZ, Employee
 from .services import (
     COLUMNS,
+    custom_production_summary,
     custom_report,
     export_xlsx,
     import_base,
@@ -115,6 +116,8 @@ def _filtered(params):
     params — словарь (обычно request.GET), содержащий параметры:
     - q: поиск по табельному номеру или ФИО
     - dep: фильтр по цеху (подразделению)
+    - production: фильтр по производству
+    - service: фильтр по службе
     - okrug: фильтр по округу (поддерживает 'none' для пустых значений)
     - uik: фильтр по номеру УИК
     - method: фильтр по запланированному способу голосования (поддерживает 'none')
@@ -124,6 +127,8 @@ def _filtered(params):
     qs = Employee.objects.all()
     search = (params.get("q") or "").strip()
     dep = (params.get("dep") or "").strip()
+    production = (params.get("production") or "").strip()
+    service = (params.get("service") or "").strip()
     okrug = (params.get("okrug") or "").strip()
     uik = (params.get("uik") or "").strip()
     method = (params.get("method") or "").strip()
@@ -140,6 +145,10 @@ def _filtered(params):
         )
     if dep:
         qs = qs.filter(department=dep)
+    if production:
+        qs = qs.filter(production=production)
+    if service:
+        qs = qs.filter(service=service)
     if okrug == "none":
         qs = qs.filter(okrug="")
     elif okrug:
@@ -235,6 +244,14 @@ def _context(request):
         .values_list("department", flat=True)
         .distinct()
         .order_by("department"),
+        "productions": Employee.objects.exclude(production="")
+        .values_list("production", flat=True)
+        .distinct()
+        .order_by("production"),
+        "services": Employee.objects.exclude(service="")
+        .values_list("service", flat=True)
+        .distinct()
+        .order_by("service"),
         "okrugs": Employee.objects.exclude(okrug="")
         .values_list("okrug", flat=True)
         .distinct()
@@ -563,13 +580,29 @@ def export_method_archive(request):
 def export_custom_report(request):
     """
     Генерация и отдача сводного отчета по сотрудникам на основе фильтров из формы.
-    Фильтры передаются через GET-параметры и обрабатываются в custom_report (services.py).
+    Фильтры передаются через GET-параметры. В зависимости от значения параметра grouping
+    формируются разные типы отчёта:
+    - "people" (по умолчанию): список по каждому сотруднику (вызывает custom_report)
+    - "production_with_depts": агрегация по производствам с разбивкой по цехам
+    - "production_without_depts": агрегация по производствам без разбивки по цехам
     """
-    book = custom_report(request.GET)
+    grouping = request.GET.get("grouping", "people")
+
+    if grouping == "production_with_depts":
+        book = custom_production_summary(request.GET, include_depts=True)
+        name = (
+            f"svodny_po_proizvodstvam_s_cehami_{timezone.localtime():%Y%m%d_%H%M}.xlsx"
+        )
+    elif grouping == "production_without_depts":
+        book = custom_production_summary(request.GET, include_depts=False)
+        name = f"svodny_po_proizvodstvam_{timezone.localtime():%Y%m%d_%H%M}.xlsx"
+    else:
+        book = custom_report(request.GET)
+        name = f"svodny_otchet_{timezone.localtime():%Y%m%d_%H%M}.xlsx"
+
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-    name = f"svodny_otchet_{timezone.localtime():%Y%m%d_%H%M}.xlsx"
     response["Content-Disposition"] = f'attachment; filename="{name}"'
     book.save(response)
     return response

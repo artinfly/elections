@@ -36,7 +36,7 @@
             {# Фильтр по службе #}
             <div class="filter-group">
                 <label class="filter-label">Служба</label>
-                <select class="filter-select" name="production">
+                <select class="filter-select" name="service">
                     <option value="">Все</option>
                     {% for s in services %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
                 </select>
@@ -84,12 +84,14 @@
                     {% for u in uiks %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
                 </select>
             </div>
-            {# Чекбокс для переключения отчёта по производствам #}
-            <div class="filter-group d-flex align-items-end" style="padding-bottom: 8px;">
-                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500; font-size: 0.9rem; margin: 0;">
-                    <input type="checkbox" name="group_by_production" value="on">
-                    По производствам
-                </label>
+            {# Выбор типа группировки отчёта #}
+            <div class="filter-group">
+                <label class="filter-label">Тип группировки</label>
+                <select class="filter-select" name="grouping">
+                    <option value="people" {% if request.GET.grouping == "people" or not request.GET.grouping %}selected{% endif %}>По людям (список)</option>
+                    <option value="production_with_depts" {% if request.GET.grouping == "production_with_depts" %}selected{% endif %}>По производствам (с цехами)</option>
+                    <option value="production_without_depts" {% if request.GET.grouping == "production_without_depts" %}selected{% endif %}>По производствам (без цехов)</option>
+                </select>
             </div>
             {# Кнопка формирует и сразу скачивает отчёт #}
             <div class="filter-group">
