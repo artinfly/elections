@@ -403,7 +403,7 @@ def export_page(request):
         Employee.objects.exclude(department="").values("department").distinct().count()
     )
     productions_count = (
-        Employee.objects.exclude(production="").values("production").distinct().count()
+        Employee.objects.exclude(production="").values("service").distinct().count()
     )
     return render(
         request,
@@ -419,6 +419,10 @@ def export_page(request):
             .values_list("production", flat=True)
             .distinct()
             .order_by("production"),
+            "services": Employee.objects.exclude(service="")
+            .values_list("service", flat=True)
+            .distinct()
+            .order_by("service"),
             "departments": Employee.objects.exclude(department="")
             .values_list("department", flat=True)
             .distinct()

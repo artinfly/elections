@@ -5,7 +5,7 @@ from datetime import datetime
 import openpyxl
 from django.db.models import Count, F, Q
 from django.utils import timezone
-from openpyxl.styles import Alignment, Font
+from openpyxl.styles import Alignment, Border, Font, Side
 from openpyxl.utils import get_column_letter
 
 from utils.archiver import ReportArchiver
@@ -373,11 +373,11 @@ def production_table():
     grouped = {}
     for row in (
         Employee.objects.exclude(department="")
-        .values("production", "department")
+        .values("service", "department")
         .annotate(people=Count("id"), came=Count("id", filter=Q(voted=True)))
         .order_by()
     ):
-        grouped.setdefault(row["production"] or NO_PRODUCTION, []).append(row)
+        grouped.setdefault(row["service"] or NO_PRODUCTION, []).append(row)
 
     book = openpyxl.Workbook()
     sheet = book.active
@@ -474,7 +474,8 @@ def production_method_table(exclude_u19=False):
 
     grouped = {}
     for row in (
-        queryset.values("production", "department")
+        Employee.objects.exclude(department="")
+        .values("service", "department")
         .annotate(
             people=Count("id"),
             deg=Count("id", filter=Q(method=DEG)),
@@ -484,7 +485,7 @@ def production_method_table(exclude_u19=False):
         )
         .order_by()
     ):
-        grouped.setdefault(row["production"] or NO_PRODUCTION, []).append(row)
+        grouped.setdefault(row["service"] or NO_PRODUCTION, []).append(row)
 
     book = openpyxl.Workbook()
     sheet = book.active
@@ -771,7 +772,6 @@ def export_xlsx():
 # Вся семантика отчёта собрана здесь: если смысл колонки изменится,
 # достаточно поправить предикат в этом списке.
 # ВАЖНО: предикаты используют поля detached и not_going — они должны быть
-# добавлены в модель Employee (см. миграцию 0011).
 CUSTOM_COLUMNS = [
     ("ДЭГ", "Планирует", lambda p: p.method == DEG),
     ("ДЭГ", "Проголосовал", lambda p: p.voted and p.voted_method == DEG),
@@ -799,9 +799,12 @@ def _custom_qs(params):
     where = (params.get("where") or "").strip()
     okrug = (params.get("okrug") or "").strip()
     uik = (params.get("uik") or "").strip()
+    service = (params.get("service") or "").strip()
 
     if production:
         qs = qs.filter(production=production)
+    if service:
+        qs = qs.filter(service=service)
     if dep:
         qs = qs.filter(department=dep)
     if method == "none":
@@ -837,17 +840,21 @@ def _custom_groups():
     return groups
 
 
-def custom_report(params):
+def custom_report(params, moment=None):
     """
     Формирует сводный Excel-отчёт по сотрудникам на основе фильтров формы.
-    Структура как на макете: ведущие колонки (УИК, цех, таб.№, ФИО, округ),
-    затем группы способов с подколонками "Планирует/Проголосовал" (и "Открепился"
-    для "Не 19 округ"), одиночная колонка "Не пойдет" и строка ИТОГО внизу.
-    В ячейках ставится 1, если предикат колонки выполнен для сотрудника.
+    Поддерживает 2 режима: список по сотрудникам или группировка по производствам.
+    В режиме по производству сверху добавляется строка с датой и временем формирования.
     """
-    people = _custom_qs(params).order_by(
-        "uik", "department", "surname", "name", "patronymic"
-    )
+    group_by_production = params.get("group_by_production") == "on"
+    moment = moment or timezone.localtime()
+    people = _custom_qs(params)
+    if not group_by_production:
+        people = people.order_by("uik", "department", "surname", "name", "patronymic")
+    else:
+        people = people.order_by(
+            "production", "department", "surname", "name", "patronymic"
+        )
 
     book = openpyxl.Workbook()
     sheet = book.active
@@ -855,16 +862,32 @@ def custom_report(params):
     bold = Font(bold=True)
     centered = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
+    # В режиме по производствам шапка сдвинута на строку вниз - сверху идёт заголовок отчёта
+    header_offset = 1 if group_by_production else 0
+
     # Ведущие колонки: заголовок объединяет две строки шапки
     column = 1
-    for title in ("Номер УИК", "Цех", "Таб.№", "ФИО", "Округ"):
-        sheet.merge_cells(
-            start_row=1, start_column=column, end_row=2, end_column=column
-        )
-        cell = sheet.cell(1, column, title)
-        cell.font = bold
-        cell.alignment = centered
-        column += 1
+    if group_by_production:
+        for title in ("Производство", "Цех", "Всего"):
+            sheet.merge_cells(
+                start_row=1 + header_offset,
+                start_column=column,
+                end_row=2 + header_offset,
+                end_column=column,
+            )
+            cell = sheet.cell(1 + header_offset, column, title)
+            cell.font = bold
+            cell.alignment = centered
+            column += 1
+    else:
+        for title in ("Номер УИК", "Цех", "Таб.№", "ФИО", "Округ"):
+            sheet.merge_cells(
+                start_row=1, start_column=column, end_row=2, end_column=column
+            )
+            cell = sheet.cell(1, column, title)
+            cell.font = bold
+            cell.alignment = centered
+            column += 1
 
     # Группы способов: имя группы в первой строке, подколонки во второй
     predicates = []
@@ -872,48 +895,146 @@ def custom_report(params):
         start, end = column, column + len(subs) - 1
         if group:
             sheet.merge_cells(
-                start_row=1, start_column=start, end_row=1, end_column=end
+                start_row=1 + header_offset,
+                start_column=start,
+                end_row=1 + header_offset,
+                end_column=end,
             )
-            head = sheet.cell(1, column, group)
+            head = sheet.cell(1 + header_offset, column, group)
         else:
             # Одиночная колонка без группы — заголовок на две строки
             sheet.merge_cells(
-                start_row=1, start_column=start, end_row=2, end_column=end
+                start_row=1 + header_offset,
+                start_column=start,
+                end_row=2 + header_offset,
+                end_column=end,
             )
-            head = sheet.cell(1, column, subs[0][0])
+            head = sheet.cell(1 + header_offset, column, subs[0][0])
         head.font = bold
         head.alignment = centered
         for sub, predicate in subs:
             if group:
-                cell = sheet.cell(2, column, sub)
+                cell = sheet.cell(2 + header_offset, column, sub)
                 cell.font = bold
                 cell.alignment = centered
             predicates.append(predicate)
             column += 1
 
-    # Ширины колонок: 5 ведущих + по одной на каждый предикат
-    for index, width in enumerate((10, 8, 10, 42, 8) + (12,) * len(predicates), 1):
+    if group_by_production:
+        total_columns = 3 + len(predicates)
+        title = sheet.cell(
+            1, 1, f"Итоговый отчёт по видам производства на {moment:%d.%m.%y %H:%M}"
+        )
+        title.font = Font(bold=True, size=12)
+        title.alignment = centered
+        sheet.merge_cells(
+            start_row=1, start_column=1, end_row=1, end_column=total_columns
+        )
+
+    # Ширины колонок: ведущие + по одной на каждый предикат
+    widths = (
+        (16, 14, 10) + (12,) * len(predicates)
+        if group_by_production
+        else (10, 8, 10, 42, 8) + (12,) * len(predicates)
+    )
+    for index, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
 
-    # Строки с данными (с 3-й строки листа) и параллельный подсчёт итогов
+    row = 3 + header_offset
     totals = [0] * len(predicates)
-    row = 3
-    for person in people.iterator(chunk_size=2000):
-        sheet.cell(row, 1, person.uik)
-        sheet.cell(row, 2, person.department)
-        sheet.cell(row, 3, person.tab_number)
-        sheet.cell(row, 4, person.fio)
-        sheet.cell(row, 5, person.okrug)
-        for offset, predicate in enumerate(predicates):
-            if predicate(person):
-                sheet.cell(row, 6 + offset, 1)
-                totals[offset] += 1
-        row += 1
 
-    # Строка ИТОГО с суммами по каждой колонке-предикату
-    sheet.cell(row, 1, "ИТОГО").font = bold
-    for offset, total in enumerate(totals):
-        cell = sheet.cell(row, 6 + offset, total)
-        cell.font = bold
-        cell.alignment = centered
+    if group_by_production:
+        from collections import defaultdict
+
+        data = defaultdict(lambda: defaultdict(list))
+        for person in people.iterator(chunk_size=2000):
+            data[person.production or NO_PRODUCTION][person.department].append(person)
+
+        grand_total_people = 0
+        grand_totals = [0] * len(predicates)
+
+        for production in sorted(
+            data.keys(), key=lambda name: (name == NO_PRODUCTION, name)
+        ):
+            # Заголовок производства
+            sheet.merge_cells(
+                start_row=row,
+                start_column=1,
+                end_row=row,
+                end_column=3 + len(predicates),
+            )
+            cell = sheet.cell(row, 1, production)
+            cell.font = bold
+            cell.alignment = Alignment(horizontal="center")
+            row += 1
+
+            prod_total_people = 0
+            prod_totals = [0] * len(predicates)
+
+            for department in sorted(data[production].keys(), key=_by_number):
+                persons = data[production][department]
+                count = len(persons)
+                prod_total_people += count
+                grand_total_people += count
+
+                sheet.cell(row, 1, production)
+                sheet.cell(row, 2, padded_number(department))
+                sheet.cell(row, 3, count).alignment = Alignment(horizontal="center")
+
+                for offset, predicate in enumerate(predicates):
+                    val = sum(1 for p in persons if predicate(p))
+                    if val > 0:
+                        sheet.cell(row, 4 + offset, val).alignment = Alignment(
+                            horizontal="center"
+                        )
+                    prod_totals[offset] += val
+                    grand_totals[offset] += val
+                row += 1
+
+            # Итого по производству
+            sheet.cell(row, 2, "Итого").font = bold
+            sheet.cell(row, 3, prod_total_people).font = bold
+            sheet.cell(row, 3).alignment = Alignment(horizontal="center")
+            for offset, val in enumerate(prod_totals):
+                cell = sheet.cell(row, 4 + offset, val)
+                cell.font = bold
+                cell.alignment = Alignment(horizontal="center")
+            row += 1
+
+        # Всего
+        sheet.cell(row, 2, "Всего по Обществу").font = bold
+        sheet.cell(row, 3, grand_total_people).font = bold
+        sheet.cell(row, 3).alignment = Alignment(horizontal="center")
+        for offset, val in enumerate(grand_totals):
+            cell = sheet.cell(row, 4 + offset, val)
+            cell.font = bold
+            cell.alignment = Alignment(horizontal="center")
+    else:
+        for person in people.iterator(chunk_size=2000):
+            sheet.cell(row, 1, person.uik)
+            sheet.cell(row, 2, person.department)
+            sheet.cell(row, 3, person.tab_number)
+            sheet.cell(row, 4, person.fio)
+            sheet.cell(row, 5, person.okrug)
+            for offset, predicate in enumerate(predicates):
+                if predicate(person):
+                    sheet.cell(row, 6 + offset, "+")
+                    totals[offset] += 1
+            row += 1
+
+        # Строка ИТОГО с суммами по кажжой колонке-предикату
+        sheet.cell(row, 1, "ИТОГО").font = bold
+        for offset, total in enumerate(totals):
+            cell = sheet.cell(row, 6 + offset, total)
+            cell.font = bold
+            cell.alignment = centered
+
+    thin = Side(style="thin", color="000000")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for row_cells in sheet.iter_rows(
+        min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column
+    ):
+        for cell in row_cells:
+            cell.border = border
+
     return book

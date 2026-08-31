@@ -15,6 +15,7 @@
 {# Пользователь собирает выборку фильтрами, кнопка "Сформировать"     #}
 {# отправляет GET на export_custom и сразу скачивает готовый xlsx.    #}
 {# ================================================================== #}
+<div class="narrow">
 <div class="card-block mb-4">
     <div class="block-title">Сводный отчёт по фильтрам</div>
     <div class="hint">
@@ -30,6 +31,14 @@
                 <select class="filter-select" name="production">
                     <option value="">Все</option>
                     {% for p in productions %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+                </select>
+            </div>
+            {# Фильтр по службе #}
+            <div class="filter-group">
+                <label class="filter-label">Служба</label>
+                <select class="filter-select" name="production">
+                    <option value="">Все</option>
+                    {% for s in services %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
                 </select>
             </div>
             {# Фильтр по запланированному способу голосования #}
@@ -75,6 +84,13 @@
                     {% for u in uiks %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
                 </select>
             </div>
+            {# Чекбокс для переключения отчёта по производствам #}
+            <div class="filter-group d-flex align-items-end" style="padding-bottom: 8px;">
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500; font-size: 0.9rem; margin: 0;">
+                    <input type="checkbox" name="group_by_production" value="on">
+                    По производствам
+                </label>
+            </div>
             {# Кнопка формирует и сразу скачивает отчёт #}
             <div class="filter-group">
                 <button class="btn-orange" type="submit">Сформировать</button>
@@ -83,7 +99,6 @@
     </form>
 </div>
 
-<div class="narrow">
     {# ZIP-архив с отчётами по явке: отдельный файл на каждый цех #}
     <div class="card-block export-row">
         <div class="export-text">
@@ -153,16 +168,16 @@
     {# Отчёт по производствам: явка (всего / проголосовало / процент) #}
     <div class="card-block export-row">
         <div class="export-text">
-            <div class="block-title">Разделение по производствам (Голосование)</div>
+            <div class="block-title">Разделение по службам (Голосование)</div>
             <div class="hint">
-                Цеха сгруппированы по производствам: для каждого число работающих,
-                количество проголосовавших и процент. Под каждым производством
+                Цеха сгруппированы по службам: для каждого число работающих,
+                количество проголосовавших и процент. Под каждой службой
                 строка «Итого».
             </div>
         </div>
         <div class="export-side">
             <div class="export-num">{{ productions_count }}</div>
-            <div class="export-unit">производств</div>
+            <div class="export-unit">служб</div>
             <a class="btn-orange" href="{% url 'export_productions' %}">Скачать</a>
         </div>
     </div>
@@ -170,16 +185,16 @@
     {# Отчёт по производствам: распределение способов голосования #}
     <div class="card-block export-row">
         <div class="export-text">
-            <div class="block-title">Способы голосования по производствам</div>
+            <div class="block-title">Способы голосования по службам</div>
             <div class="hint">
-                То же разделение по производствам, но вместо явки - способы голосования, общее
-                количество проголосовавших и процент. Под каждым производством
+                То же разделение по службам, но вместо явки - способы голосования, общее
+                количество проголосовавших и процент. Под каждой службой
                 строка «Итого».
             </div>
         </div>
         <div class="export-side">
             <div class="export-num">{{ productions_count }}</div>
-            <div class="export-unit">производств</div>
+            <div class="export-unit">служб</div>
             <a class="btn-orange" href="{% url 'export_production_methods' %}">Скачать</a>
         </div>
     </div>
@@ -187,16 +202,16 @@
     {# Тот же отчёт по производствам, но без сотрудников 19 округа #}
     <div class="card-block export-row">
         <div class="export-text">
-            <div class="block-title">Способы голосования по производствам (Без 19 округа)</div>
+            <div class="block-title">Способы голосования по службам (Без 19 округа)</div>
             <div class="hint">
-                То же разделение по производствам, но без сотрудников 19 округа:
-                способы голосования, общее количество и процент. Под каждым
-                производством строка «Итого».
+                То же разделение по службам, но без сотрудников 19 округа:
+                способы голосования, общее количество и процент. Под каждой
+                службой строка «Итого».
             </div>
         </div>
         <div class="export-side">
             <div class="export-num">{{ productions_count }}</div>
-            <div class="export-unit">производств</div>
+            <div class="export-unit">служб</div>
             <a class="btn-orange" href="{% url 'export_production_methods_no_19' %}">Скачать</a>
         </div>
     </div>

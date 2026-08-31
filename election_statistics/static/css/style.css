@@ -148,7 +148,7 @@ body {
 }
 .filter-input { width: 200px; }
 /* Растягивающаяся группа поиска */
-.filter-group.grow { flex: 1 1 280px; min-width: 220px; }
+.filter-group.grow { flex: 0 0 280px; min-width: 220px; }
 .filter-group.grow .filter-input { width: 100%; }
 .filter-select { width: 110px; }
 .filter-input:focus, .filter-select:focus {

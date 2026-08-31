@@ -26,6 +26,9 @@ class Employee(models.Model):
     production = models.CharField(
         "Производство", max_length=200, blank=True, db_index=True
     )
+    service = models.CharField(
+        "Служба", max_length=200, blank=True, db_index=True
+    )
     surname = models.CharField("Фамилия", max_length=100)
     name = models.CharField("Имя", max_length=100)
     patronymic = models.CharField("Отчество", max_length=100, blank=True)
