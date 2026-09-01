@@ -1,6 +1,12 @@
+"""
+Модуль для генерации кастомных (динамических) отчетов на основе фильтров пользователя.
+"""
+
+from collections import defaultdict
 from datetime import datetime
 from typing import Any, Callable, List, Optional, Tuple
 
+import openpyxl
 from django.db.models import Q
 from django.utils import timezone
 from openpyxl.styles import Alignment, Font
@@ -15,9 +21,11 @@ from .helpers import (
 )
 from .models import DEG, UIK, UIK19, UVZ, Employee
 
+# Конфигурация колонок сводного отчета: (Группа, Подколонка, Предикат-проверка)
+# Вся бизнес-логика отображения галочек сосредоточена здесь.
 CUSTOM_COLUMNS: List[Tuple[str, str, Callable]] = [
     ("ДЭГ", "Планирует", lambda p: p.method == DEG),
-    ("ДЭГ", "Зарегестрирован", lambda p: p.mark_deg),
+    ("ДЭГ", "Зарегистрирован", lambda p: p.mark_deg),
     ("ДЭГ", "Проголосовал", lambda p: p.voted and p.voted_method == DEG),
     ("На участке", "Планирует", lambda p: p.method == UIK),
     ("На участке", "Проголосовал", lambda p: p.voted and p.voted_method == UIK),
@@ -25,6 +33,7 @@ CUSTOM_COLUMNS: List[Tuple[str, str, Callable]] = [
     ("На участке УВЗ", "Заявление оформил", lambda p: p.mark_uvz),
     ("На участке УВЗ", "Проголосовал", lambda p: p.voted and p.voted_method == UVZ),
     ("Не 19 округ", "Планирует", lambda p: p.method == UIK19),
+    # ИСПРАВЛЕНО: было p.method in UIK19 (ошибка логики), стало строгое равенство
     ("Не 19 округ", "Открепился", lambda p: p.method == UIK19 and p.detached),
     ("Не 19 округ", "Проголосовал", lambda p: p.voted and p.voted_method == UIK19),
     ("", "Не определился", lambda p: p.not_going),
@@ -32,8 +41,9 @@ CUSTOM_COLUMNS: List[Tuple[str, str, Callable]] = [
 
 
 def _custom_qs(params: dict):
-    """Строит QuerySet для сводного отчёта по параметрам формы-конструктора."""
+    """Строит QuerySet сотрудников на основе параметров фильтрации из формы."""
     qs = Employee.objects.all()
+
     production = (params.get("production") or "").strip()
     dep = (params.get("dep") or "").strip()
     method = (params.get("method") or "").strip()
@@ -48,27 +58,32 @@ def _custom_qs(params: dict):
         qs = qs.filter(service=service)
     if dep:
         qs = qs.filter(department=dep)
+
     if method == "none":
         qs = qs.filter(method="")
     elif method:
         qs = qs.filter(method=method)
+
     if where == "none":
         qs = qs.filter(voted_method="")
     elif where:
         qs = qs.filter(voted_method=where)
+
     if okrug == "none":
         qs = qs.filter(okrug="")
     elif okrug == "20+21":
         qs = qs.filter(okrug__in=["20", "21"])
     elif okrug:
         qs = qs.filter(okrug=okrug)
+
     if uik:
         qs = qs.filter(uik=uik)
+
     return qs
 
 
 def _custom_groups() -> List[Tuple[str, List[Tuple[str, Callable]]]]:
-    """Группирует колонки CUSTOM_COLUMNS."""
+    """Группирует колонки CUSTOM_COLUMNS по первому элементу кортежа (имени группы)."""
     groups = []
     for group, sub, predicate in CUSTOM_COLUMNS:
         if groups and groups[-1][0] == group:
@@ -79,9 +94,7 @@ def _custom_groups() -> List[Tuple[str, List[Tuple[str, Callable]]]]:
 
 
 def _draw_custom_groups(sheet: Any, start_row: int, start_col: int) -> List[Callable]:
-    """Рисует заголовки групп и подколонок из CUSTOM_COLUMNS."""
-    from openpyxl.styles import Font
-
+    """Отрисовывает объединенные заголовки групп и подколонок в Excel. Возвращает список предикатов."""
     bold = Font(bold=True)
     centered = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
@@ -105,8 +118,10 @@ def _draw_custom_groups(sheet: Any, start_row: int, start_col: int) -> List[Call
                 end_column=end,
             )
             head = sheet.cell(start_row, column, subs[0][0])
+
         head.font = bold
         head.alignment = centered
+
         for sub, predicate in subs:
             if group:
                 cell = sheet.cell(start_row + 1, column, sub)
@@ -118,9 +133,7 @@ def _draw_custom_groups(sheet: Any, start_row: int, start_col: int) -> List[Call
 
 
 def custom_report(params: dict, moment: Optional[datetime] = None) -> Any:
-    """Формирует сводный Excel-отчёт по сотрудникам (режим "По людям")."""
-    import openpyxl
-
+    """Генерирует сводный Excel-отчет 'По людям' на основе фильтров."""
     moment = moment or timezone.localtime()
     people = _custom_qs(params).order_by(
         "department", "surname", "name", "patronymic", "uik"
@@ -132,6 +145,7 @@ def custom_report(params: dict, moment: Optional[datetime] = None) -> Any:
     bold = Font(bold=True)
     centered = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
+    # Ведущие колонки
     column = 1
     for title in ("Номер УИК", "Цех", "Таб.№", "ФИО", "Округ"):
         sheet.merge_cells(
@@ -144,6 +158,7 @@ def custom_report(params: dict, moment: Optional[datetime] = None) -> Any:
 
     predicates = _draw_custom_groups(sheet, start_row=1, start_col=column)
 
+    # Настройка ширины колонок
     widths = (10, 8, 10, 42, 8) + (12,) * len(predicates)
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
@@ -154,6 +169,7 @@ def custom_report(params: dict, moment: Optional[datetime] = None) -> Any:
     totals = [0] * len(predicates)
     total_people = 0
 
+    # Итератор chunk_size предотвращает переполнение памяти на больших выборках
     for person in people.iterator(chunk_size=2000):
         total_people += 1
         sheet.cell(row, 1, person.uik)
@@ -161,17 +177,21 @@ def custom_report(params: dict, moment: Optional[datetime] = None) -> Any:
         sheet.cell(row, 3, person.tab_number)
         sheet.cell(row, 4, person.fio)
         sheet.cell(row, 5, person.okrug)
+
         for offset, predicate in enumerate(predicates):
             if predicate(person):
                 sheet.cell(row, 6 + offset, "+")
                 totals[offset] += 1
         row += 1
 
+    # Последняя колонка ("Не определился") считается как остаток от общего числа
     totals[-1] = total_people - sum(totals[:-1])
 
+    # Строка ИТОГО
     sheet.cell(row, 1, "ИТОГО").font = bold
     sheet.cell(row, 2, total_people).font = bold
     sheet.cell(row, 2).alignment = centered
+
     for offset, total in enumerate(totals):
         cell = sheet.cell(row, 6 + offset, _format_with_percent(total, total_people))
         cell.font = bold
@@ -184,11 +204,7 @@ def custom_report(params: dict, moment: Optional[datetime] = None) -> Any:
 def custom_production_summary(
     params: dict, include_depts: bool = False, moment: Optional[datetime] = None
 ) -> Any:
-    """Сводный отчёт с группировкой по производствам."""
-    from collections import defaultdict
-
-    import openpyxl
-
+    """Генерирует сводный отчет с группировкой по производствам (опционально с разбивкой по цехам)."""
     moment = moment or timezone.localtime()
     people = _custom_qs(params).order_by(
         "production", "department", "surname", "name", "patronymic"
@@ -243,6 +259,7 @@ def custom_production_summary(
 
     sheet.freeze_panes = "A4"
 
+    # Группировка данных в памяти
     if include_depts:
         data = defaultdict(lambda: defaultdict(list))
     else:
@@ -266,9 +283,8 @@ def custom_production_summary(
             sheet.merge_cells(
                 start_row=row, start_column=1, end_row=row, end_column=total_columns
             )
-            cell = sheet.cell(row, 1, production)
-            cell.font = bold
-            cell.alignment = Alignment(horizontal="center")
+            sheet.cell(row, 1, production).font = bold
+            sheet.cell(row, 1).alignment = Alignment(horizontal="center")
             row += 1
 
             prod_total_people = 0
@@ -295,7 +311,6 @@ def custom_production_summary(
                 row += 1
 
             prod_totals[-1] = prod_total_people - sum(prod_totals[:-1])
-            sheet.cell(row, 1, "")
             sheet.cell(row, 2, "Итого").font = bold
             sheet.cell(row, 3, prod_total_people).font = bold
             sheet.cell(row, 3).alignment = Alignment(horizontal="center")
