@@ -48,6 +48,14 @@ def is_operator(user):
     return user.is_superuser or user.groups.filter(name="operator").exists()
 
 
+def can_edit(user):
+    """
+    Может ли пользователь редактировать способы голосования и явку.
+    Вьюеры (группа 'viewer') - только просматривают, но не меняют.
+    """
+    return not user.groups.filter(name="viewer").exists()
+
+
 def _known_method(value):
     """
     Валидирует значение способа голосования.
@@ -263,6 +271,7 @@ def _context(request):
         "f": request.GET,
         "query": params.urlencode(),
         "page_range": _page_window(page),
+        "can_edit": can_edit(request.user),
     }
 
 
@@ -342,6 +351,34 @@ def api_method(request):
         return JsonResponse({"error": "работник не найден"}, status=404)
     # Возвращаем обновленную статистику с учетом текущих фильтров
     return JsonResponse(_counts(_filtered(data.get("filters") or {})))
+
+
+MARK_FIELDS = {
+    "mark_deg": DEG,
+    "mark_uvz": UVZ,
+}
+
+
+@login_required
+@require_POST
+def api_mark(request):
+    data, bad = _body(request)
+    if bad:
+        return bad
+    field = data.get("field")
+    if field not in MARK_FIELDS:
+        return JsonResponse({"error": "неизвестное поле"}, status=400)
+    person = Employee.objects.filter(pk=_pk(data.get("id"))).first()
+    if person is None:
+        return JsonResponse({"error": "работник не найден"}, status=404)
+    if person.method != MARK_FIELDS[field]:
+        return JsonResponse(
+            {"error": "способ голосования сотрудника не соответсвует этому полю"},
+            status=400,
+        )
+    setattr(person, field, bool(data.get("value")))
+    person.save(update_fields=[field])
+    return JsonResponse({field: getattr(person, field)})
 
 
 @login_required

@@ -151,6 +151,8 @@ body {
 .filter-group.grow { flex: 0 0 280px; min-width: 220px; }
 .filter-group.grow .filter-input { width: 100%; }
 .filter-select { width: 110px; }
+/* Модификатор для отдельных полей, которым нужна ширина больше стандартной */
+.filter-select-wide { width: 220px; }
 .filter-input:focus, .filter-select:focus {
     border-color: var(--orange);
     box-shadow: 0 0 0 3px rgba(224,123,42,0.12);

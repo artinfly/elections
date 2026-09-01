@@ -87,7 +87,7 @@
             {# Выбор типа группировки отчёта #}
             <div class="filter-group">
                 <label class="filter-label">Тип группировки</label>
-                <select class="filter-select" name="grouping">
+                <select class="filter-select filter-select-wide" name="grouping">
                     <option value="people" {% if request.GET.grouping == "people" or not request.GET.grouping %}selected{% endif %}>По людям (список)</option>
                     <option value="production_with_depts" {% if request.GET.grouping == "production_with_depts" %}selected{% endif %}>По производствам (с цехами)</option>
                     <option value="production_without_depts" {% if request.GET.grouping == "production_without_depts" %}selected{% endif %}>По производствам (без цехов)</option>
@@ -100,23 +100,10 @@
         </div>
     </form>
 </div>
-
-    {# ZIP-архив с отчётами по явке: отдельный файл на каждый цех #}
-    <div class="card-block export-row">
-        <div class="export-text">
-            <div class="block-title">Итоги голосования</div>
-            <div class="hint">
-                Zip-архив, внутри отдельный файл на каждый цех. Имя файла — номер цеха 
-                из трёх цифр. В файле: сколько всего голосующих, сколько проголосовало, 
-                процент явки и список тех, кто не проголосовал.
-            </div>
-        </div>
-        <div class="export-side">
-            <div class="export-num">{{ departments_count }}</div>
-            <div class="export-unit">цехов</div>
-            <a class="btn-orange" href="{% url 'export_archive' %}">Скачать</a>
-        </div>
-    </div>
+</div>
+<div class="export-columns">
+<div class="export-col">
+    <div class="export-col-title">Способ голосования</div>
 
     {# ZIP-архив по цехам: сколько человек выбрали способ голосования #}
     <div class="card-block export-row">
@@ -167,23 +154,6 @@
         </div>
     </div>
 
-    {# Отчёт по производствам: явка (всего / проголосовало / процент) #}
-    <div class="card-block export-row">
-        <div class="export-text">
-            <div class="block-title">Разделение по службам (Голосование)</div>
-            <div class="hint">
-                Цеха сгруппированы по службам: для каждого число работающих,
-                количество проголосовавших и процент. Под каждой службой
-                строка «Итого».
-            </div>
-        </div>
-        <div class="export-side">
-            <div class="export-num">{{ productions_count }}</div>
-            <div class="export-unit">служб</div>
-            <a class="btn-orange" href="{% url 'export_productions' %}">Скачать</a>
-        </div>
-    </div>
-
     {# Отчёт по производствам: распределение способов голосования #}
     <div class="card-block export-row">
         <div class="export-text">
@@ -217,6 +187,44 @@
             <a class="btn-orange" href="{% url 'export_production_methods_no_19' %}">Скачать</a>
         </div>
     </div>
+</div>
+
+<div class="export-col">
+    <div class="export-col-title">Голосование</div>
+
+    {# ZIP-архив с отчётами по явке: отдельный файл на каждый цех #}
+    <div class="card-block export-row">
+        <div class="export-text">
+            <div class="block-title">Итоги голосования</div>
+            <div class="hint">
+                Zip-архив, внутри отдельный файл на каждый цех. Имя файла — номер цеха 
+                из трёх цифр. В файле: сколько всего голосующих, сколько проголосовало, 
+                процент явки и список тех, кто не проголосовал.
+            </div>
+        </div>
+        <div class="export-side">
+            <div class="export-num">{{ departments_count }}</div>
+            <div class="export-unit">цехов</div>
+            <a class="btn-orange" href="{% url 'export_archive' %}">Скачать</a>
+        </div>
+    </div>
+
+    {# Отчёт по производствам: явка (всего / проголосовало / процент) #}
+    <div class="card-block export-row">
+        <div class="export-text">
+            <div class="block-title">Разделение по службам (Голосование)</div>
+            <div class="hint">
+                Цеха сгруппированы по службам: для каждого число работающих,
+                количество проголосовавших и процент. Под каждой службой
+                строка «Итого».
+            </div>
+        </div>
+        <div class="export-side">
+            <div class="export-num">{{ productions_count }}</div>
+            <div class="export-unit">служб</div>
+            <a class="btn-orange" href="{% url 'export_productions' %}">Скачать</a>
+        </div>
+    </div>
 
     {# Полная выгрузка всех сотрудников одним файлом #}
     <div class="card-block export-row">
@@ -233,5 +241,6 @@
             <a class="btn-ghost" href="{% url 'export_employees' %}">Скачать</a>
         </div>
     </div>
+</div>
 </div>
 {% endblock %}

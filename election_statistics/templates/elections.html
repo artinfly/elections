@@ -137,8 +137,10 @@ function paint(row, voted) {
 
 // Одиночная отметка явки кликом по кнопке в строке.
 // Отметить можно только сотрудника с выбранным способом голосования (data-plan).
+const canEdit = {% if can_edit %}true{% else %}false{% endif %}
 document.querySelectorAll('.vote-btn').forEach(function (btn) {
     btn.addEventListener('click', function () {
+        if (!canEdit) return; 
         var row = btn.closest('tr');
         var voted = !btn.classList.contains('on');
         if (voted && !btn.dataset.plan) {
@@ -161,6 +163,7 @@ var BULK_LIMIT = 100;
 // При большой выборке спрашивает подтверждение, после ответа сервера
 // обновляет счётчики, сообщение и перерисовывает видимые строки.
 function bulk(voted) {
+    if (!canEdit) return;
     if (FOUND >= BULK_LIMIT) {
         var action = voted ? 'Отметить явку' : 'Снять отметку';
         if (!confirm(action + ' сразу у ' + FOUND + ' записей?\n\nОтменить это одним действием не получится.')) {

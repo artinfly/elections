@@ -26,9 +26,7 @@ class Employee(models.Model):
     production = models.CharField(
         "Производство", max_length=200, blank=True, db_index=True
     )
-    service = models.CharField(
-        "Служба", max_length=200, blank=True, db_index=True
-    )
+    service = models.CharField("Служба", max_length=200, blank=True, db_index=True)
     surname = models.CharField("Фамилия", max_length=100)
     name = models.CharField("Имя", max_length=100)
     patronymic = models.CharField("Отчество", max_length=100, blank=True)
@@ -61,6 +59,8 @@ class Employee(models.Model):
     detached = models.BooleanField("Открепился", default=False)
     # Отметка "не пойдет": сотрудник заявил, что не будет участвовать в голосовании
     not_going = models.BooleanField("Не пойдет", default=False)
+    mark_uvz = models.BooleanField("Регистрация на УИК-УВЗ", default=False)
+    mark_deg = models.BooleanField("Регистрация на ДЭГ", default=False)
 
     class Meta:
         verbose_name = "Сотрудник"

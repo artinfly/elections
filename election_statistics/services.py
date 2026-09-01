@@ -267,6 +267,9 @@ def department_report(department, moment=None, mode="turnout"):
     for index, width in enumerate(REPORT_WIDTHS, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
 
+    # Закрепляем шапку (первые 2 строки) при прокрутке
+    sheet.freeze_panes = "A6"
+
     bold = Font(bold=True)
     title = sheet.cell(1, 1, f"{rule['title']} {moment:%d.%m.%y %H:%M}")
     title.font = Font(bold=True, size=12)
@@ -386,6 +389,9 @@ def production_table():
     for index, width in enumerate(PRODUCTION_WIDTHS, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
 
+    # Закрепляем шапку (первые 2 строки) при прокрутке
+    sheet.freeze_panes = "A3"
+
     bold = Font(bold=True)
     sheet.merge_cells("A1:A2")
     sheet.merge_cells("B1:B2")
@@ -469,24 +475,43 @@ def production_method_table(exclude_u19=False):
     для каждого — количество людей и распределение по способам (ДЭГ, УИК, УВЗ, У19).
     Если exclude_u19=True, из выборки исключаются сотрудники 19 округа.
     """
-    queryset = Employee.objects.exclude(department="")
-    if exclude_u19:
-        queryset = queryset.exclude(okrug="19")
+    # # queryset = Employee.objects.exclude(department="")
+    # if exclude_u19:
+    #     queryset = Employee.objects.exclude(department="").exclude(okrug="19")
+    #     # queryset = queryset.exclude(okrug="19")
+    # else:
+    #     queryset = Employee.objects.exclude(department="")
 
     grouped = {}
-    for row in (
-        Employee.objects.exclude(department="")
-        .values("service", "department")
-        .annotate(
-            people=Count("id"),
-            deg=Count("id", filter=Q(method=DEG)),
-            uik=Count("id", filter=Q(method=UIK)),
-            uvz=Count("id", filter=Q(method=UVZ)),
-            u19=Count("id", filter=Q(method=UIK19)),
-        )
-        .order_by()
-    ):
-        grouped.setdefault(row["service"] or NO_PRODUCTION, []).append(row)
+    if exclude_u19:
+        for row in (
+            Employee.objects.exclude(department="")
+            .values("service", "department")
+            .exclude(okrug="19")
+            .annotate(
+                people=Count("id"),
+                deg=Count("id", filter=Q(method=DEG)),
+                uik=Count("id", filter=Q(method=UIK)),
+                uvz=Count("id", filter=Q(method=UVZ)),
+                u19=Count("id", filter=Q(method=UIK19)),
+            )
+            .order_by()
+        ):
+            grouped.setdefault(row["service"] or NO_PRODUCTION, []).append(row)
+    else:
+        for row in (
+            Employee.objects.exclude(department="")
+            .values("service", "department")
+            .annotate(
+                people=Count("id"),
+                deg=Count("id", filter=Q(method=DEG)),
+                uik=Count("id", filter=Q(method=UIK)),
+                uvz=Count("id", filter=Q(method=UVZ)),
+                u19=Count("id", filter=Q(method=UIK19)),
+            )
+            .order_by()
+        ):
+            grouped.setdefault(row["service"] or NO_PRODUCTION, []).append(row)
 
     book = openpyxl.Workbook()
     sheet = book.active
@@ -495,6 +520,9 @@ def production_method_table(exclude_u19=False):
     )[:31]
     for index, width in enumerate(PRODUCTION_METHOD_WIDTHS, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
+
+    # Закрепляем шапку (первые 2 строки) при прокрутке
+    sheet.freeze_panes = "A3"
 
     bold = Font(bold=True)
     sheet.merge_cells("A1:A2")
@@ -598,6 +626,9 @@ def summary_table(group_field="department", group_title="Подразделен�
     for index, width in enumerate((18, 16, 10, 10, 12, 16, 10), 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
 
+    # Закрепляем шапку (первые 2 строки) при прокрутке
+    sheet.freeze_panes = "A2"
+
     bold = Font(bold=True)
     centered = Alignment(horizontal="center", wrap_text=True)
     headers = (
@@ -684,6 +715,9 @@ def summary_table_no_u19(group_field="department", group_title="Подразде
     for index, width in enumerate(SUMMARY_WIDTHS, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
 
+    # Закрепляем шапку (первые 2 строки) при прокрутке
+    sheet.freeze_panes = "A2"
+
     bold = Font(bold=True)
     centered = Alignment(horizontal="center", wrap_text=True)
     headers = (
@@ -755,7 +789,11 @@ def export_xlsx():
     sheet.title = "Сотрудники"
     sheet.append(list(COLUMNS) + ["Способ (план)", "Проголосовал", "Где голосовал"])
     fields = list(COLUMNS.values())
-    for person in Employee.objects.all().iterator(chunk_size=2000):
+    for person in (
+        Employee.objects.all()
+        .order_by("department", "surname", "name", "patronymic")
+        .iterator(chunk_size=2000)
+    ):
         row = [getattr(person, f) for f in fields]
         row.append(METHOD_LABELS.get(person.method, ""))
         row.append("да" if person.voted else "нет")
@@ -776,15 +814,17 @@ def export_xlsx():
 # чтобы пустые округа не попадали в эту категорию.
 CUSTOM_COLUMNS = [
     ("ДЭГ", "Планирует", lambda p: p.method == DEG),
+    ("ДЭГ", "Зарегестрирован", lambda p: p.mark_deg),
     ("ДЭГ", "Проголосовал", lambda p: p.voted and p.voted_method == DEG),
     ("На участке", "Планирует", lambda p: p.method == UIK),
     ("На участке", "Проголосовал", lambda p: p.voted and p.voted_method == UIK),
     ("На участке УВЗ", "Планирует", lambda p: p.method == UVZ),
+    ("На участке УВЗ", "Заявление оформил", lambda p: p.mark_uvz),
     ("На участке УВЗ", "Проголосовал", lambda p: p.voted and p.voted_method == UVZ),
-    ("Не 19 округ", "Планирует", lambda p: p.okrug in ["20", "21"] and bool(p.method)),
-    ("Не 19 округ", "Открепился", lambda p: p.okrug in ["20", "21"] and p.detached),
-    ("Не 19 округ", "Проголосовал", lambda p: p.okrug in ["20", "21"] and p.voted),
-    ("", "Не пойдет", lambda p: p.not_going),
+    ("Не 19 округ", "Планирует", lambda p: p.method == UIK19),
+    ("Не 19 округ", "Открепился", lambda p: p.method in UIK19 and p.detached),
+    ("Не 19 округ", "Проголосовал", lambda p: p.voted and p.voted_method == UIK19),
+    ("", "Не определился", lambda p: p.not_going),
 ]
 
 
@@ -893,6 +933,12 @@ def _apply_border(sheet):
             cell.border = border
 
 
+def _format_with_percent(count, total):
+    if not total:
+        return count
+    return f"{count} ({round(count / total * 100)}%)"
+
+
 def custom_report(params, moment=None):
     """
     Формирует сводный Excel-отчёт по сотрудникам (режим "По людям") на основе фильтров формы.
@@ -900,7 +946,7 @@ def custom_report(params, moment=None):
     """
     moment = moment or timezone.localtime()
     people = _custom_qs(params).order_by(
-        "uik", "department", "surname", "name", "patronymic"
+        "department", "surname", "name", "patronymic", "uik"
     )
 
     book = openpyxl.Workbook()
@@ -928,9 +974,14 @@ def custom_report(params, moment=None):
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
 
+    # Закрепляем шапку (первые 2 строки) при прокрутке
+    sheet.freeze_panes = "A3"
+
     row = 3
     totals = [0] * len(predicates)
+    total_people = 0
     for person in people.iterator(chunk_size=2000):
+        total_people += 1
         sheet.cell(row, 1, person.uik)
         sheet.cell(row, 2, person.department)
         sheet.cell(row, 3, person.tab_number)
@@ -942,10 +993,21 @@ def custom_report(params, moment=None):
                 totals[offset] += 1
         row += 1
 
+    # Последняя колонка ("Не определился") в строке ИТОГО - не подсчёт по галочке
+    totals[-1] = total_people - sum(totals[:-1])
+
+    def _with_percent(count):
+        """Число + процент от общего числа людей в выборке"""
+        if not total_people:
+            return count
+        return f"{count} ({round(count / total_people * 100)}%)"
+
     # Строка ИТОГО
     sheet.cell(row, 1, "ИТОГО").font = bold
+    sheet.cell(row, 2, total_people).font = bold
+    sheet.cell(row, 2).alignment = centered
     for offset, total in enumerate(totals):
-        cell = sheet.cell(row, 6 + offset, total)
+        cell = sheet.cell(row, 6 + offset, _with_percent(total))
         cell.font = bold
         cell.alignment = centered
 
@@ -1018,6 +1080,9 @@ def custom_production_summary(params, include_depts=False, moment=None):
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
 
+    # Закрепляем шапку (первые 2 строки) при прокрутке
+    sheet.freeze_panes = "A4"
+
     # Группируем данные в памяти
     if include_depts:
         data = defaultdict(lambda: defaultdict(list))
@@ -1071,13 +1136,16 @@ def custom_production_summary(params, include_depts=False, moment=None):
                     grand_totals[offset] += val
                 row += 1
 
+            prod_totals[-1] = prod_total_people - sum(prod_totals[:-1])
             # Итого по производству
             sheet.cell(row, 1, "")
             sheet.cell(row, 2, "Итого").font = bold
             sheet.cell(row, 3, prod_total_people).font = bold
             sheet.cell(row, 3).alignment = Alignment(horizontal="center")
             for offset, val in enumerate(prod_totals):
-                cell = sheet.cell(row, 4 + offset, val)
+                cell = sheet.cell(
+                    row, 4 + offset, _format_with_percent(val, prod_total_people)
+                )
                 cell.font = bold
                 cell.alignment = Alignment(horizontal="center")
             row += 1
@@ -1099,13 +1167,17 @@ def custom_production_summary(params, include_depts=False, moment=None):
                 grand_totals[offset] += val
             row += 1
 
+    grand_totals[-1] = grand_total_people - sum(grand_totals[:-1])
+
     # Всего по Обществу
     if include_depts:
         sheet.cell(row, 2, "Всего по Обществу").font = bold
         sheet.cell(row, 3, grand_total_people).font = bold
         sheet.cell(row, 3).alignment = Alignment(horizontal="center")
         for offset, val in enumerate(grand_totals):
-            cell = sheet.cell(row, 4 + offset, val)
+            cell = sheet.cell(
+                row, 4 + offset, _format_with_percent(val, grand_total_people)
+            )
             cell.font = bold
             cell.alignment = Alignment(horizontal="center")
     else:
@@ -1113,7 +1185,9 @@ def custom_production_summary(params, include_depts=False, moment=None):
         sheet.cell(row, 2, grand_total_people).font = bold
         sheet.cell(row, 2).alignment = Alignment(horizontal="center")
         for offset, val in enumerate(grand_totals):
-            cell = sheet.cell(row, 3 + offset, val)
+            cell = sheet.cell(
+                row, 3 + offset, _format_with_percent(val, grand_total_people)
+            )
             cell.font = bold
             cell.alignment = Alignment(horizontal="center")
 

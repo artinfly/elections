@@ -61,6 +61,7 @@ urlpatterns = [
     ),
     # API: обновление способа голосования для одного сотрудника
     path("api/method/", views.api_method, name="api_method"),
+    path("api/mark/", views.api_mark, name="api_mark"),
     # API: отметка явки для одного сотрудника
     path("api/voted/", views.api_voted, name="api_voted"),
     # API: массовая отметка явки для всех сотрудников, попадающих под фильтры

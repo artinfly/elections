@@ -61,13 +61,41 @@
 {# Таблица сотрудников с переключателем способа голосования в каждой строке #}
 <div class="table-container">
 <table class="report-table">
-    <thead><tr><th>Цех</th><th>Таб№</th><th>ФИО</th><th>Округ</th><th>УИК</th><th class="col-method">Способ</th></tr></thead>
+    <thead><tr><th>Цех</th><th>Таб№</th><th>ФИО</th><th class="col-mark">Регистрация на УИК-УВЗ</th><th class="col-mark">Регистрация на ДЭГ</th><th>Округ</th><th>УИК</th><th class="col-method">Способ</th></tr></thead>
     <tbody>
     {% for r in rows %}
         <tr>
             <td>{{ r.department }}</td>
             <td>{{ r.tab_number }}</td>
             <td class="wrap">{{ r.fio }}</td>
+            <td class="col-mark">
+                {% if r.method == "uvz" %}
+                <button type="button" class="btn-mark {% if r.mark_uvz %}on{% endif %}"
+                        data-id="{{ r.id }}" data-field="mark_uvz"
+                        data-on-label="Заявление оформлено" data-off-label="Оформить заявление">
+                    {% if r.mark_uvz %}Заявление оформлено{% else %}Оформить заявление{% endif %}
+                </button>
+                {% else %}
+                <button type="button" class="btn-mark btn-mark-off"
+                        data-alert="У сотрудника способ голосования - не УИК-УВЗ, отметка недоступна.">
+                    Оформить заявление
+                </button>
+                {% endif %}
+            </td>
+            <td class="col-mark">
+                {% if r.method == "deg" %}
+                <button type="button" class="btn-mark {% if r.mark_deg %}on{% endif %}"
+                        data-id="{{ r.id }}" data-field="mark_deg"
+                        data-on-label="Зарегистрирован" data-off-label="Зарегистрировать">
+                    {% if r.mark_deg %}Зарегистрирован{% else %}Зарегистрировать{% endif %}
+                </button>
+                {% else %}
+                <button type="button" class="btn-mark btn-mark-off"
+                        data-alert="У сотрудника способ голосования - не ДЭГ, отметка недоступна.">
+                    Зарегистрировать
+                </button>
+                {% endif %}
+            </td>
             <td>{{ r.okrug }}</td>
             <td>{{ r.uik }}</td>
             <td class="col-method">
@@ -95,8 +123,10 @@
 // Обработка кликов по переключателям способа голосования.
 // Клик по активной кнопке сбрасывает способ (method=''),
 // клик по неактивной — назначает выбранный способ.
+    const canEdit = {% if can_edit %}true{% else %}false{% endif %}
 document.querySelectorAll('.seg').forEach(function (seg) {
     seg.addEventListener('click', function (e) {
+        if (!canEdit) return; 
         var btn = e.target.closest('button');
         if (!btn) return;
         var on = btn.classList.contains('on');
@@ -116,6 +146,25 @@ document.querySelectorAll('.seg').forEach(function (seg) {
             n[2].textContent = c.method.uvz;
             n[3].textContent = c.method.u19;
             n[4].textContent = c.method.none;
+        });
+    });
+});
+document.querySelectorAll('.btn-mark').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        if (!canEdit) return;
+        if (!btn.dataset.field) {
+            alert(btn.dataset.alert);
+            return;
+        }
+        var on = btn.classList.contains('on');
+        // Сохраняем на сервере; сервер вернёт свежие счётчики по тем же фильтрам
+        postJSON('/api/mark/', {
+            id: btn.dataset.id,
+            field: btn.dataset.field,
+            value: !on
+        }).then(function () {
+            btn.classList.toggle('on', !on);
+            btn.textContent = !on ? btn.dataset.onLabel : btn.dataset.offLabel;
         });
     });
 });
