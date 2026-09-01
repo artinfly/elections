@@ -4,7 +4,12 @@ from django.contrib.auth.models import User
 
 from .models import Employee
 
+# Сначала снимаем стандартную регистрацию модели User,
+# чтобы переопределить её нашим кастомным классом
+admin.site.unregister(User)
 
+
+@admin.register(User)
 class CustomUserAdmin(UserAdmin):
     """
     Кастомное отображение списка пользователей в админке:
@@ -17,21 +22,14 @@ class CustomUserAdmin(UserAdmin):
         "is_active",
         "last_login",
     )
-
     list_filter = (
         "is_staff",
         "is_superuser",
         "is_active",
         "last_login",
     )
-
     ordering = ("-last_login", "username")
-    search_fields = ("username",)
-
-
-# Подменяем стандартную админку пользователей на кастомную
-admin.site.unregister(User)
-admin.site.register(User, CustomUserAdmin)
+    search_fields = ("^username",)  # ^ означает поиск "начинается с", что быстрее
 
 
 @admin.register(Employee)
@@ -39,9 +37,8 @@ class EmployeeAdmin(admin.ModelAdmin):
     """
     Админка сотрудников: список с основными колонками, фильтры по способам,
     явке и подразделениям, поиск по табельному номеру и ФИО.
-    Новые отметки «Открепился» и «Не пойдет» проставляются галочками
-    прямо в списке (list_editable) — так оператор быстро заполняет данные
-    для сводного отчёта без изменения основных страниц.
+    Отметки «Открепился» и «Не пойдет» проставляются галочками
+    прямо в списке (list_editable) для быстрого заполнения сводного отчёта.
     """
 
     list_display = (
@@ -55,10 +52,13 @@ class EmployeeAdmin(admin.ModelAdmin):
         "detached",
         "not_going",
     )
-    # Поля, редактируемые прямо в списке: появляются чекбоксы,
-    # изменения сохраняются кнопкой "Сохранить" внизу страницы.
-    # Поле из list_editable обязано присутствовать в list_display.
+
+    # Делаем вычисляемые поля доступными для просмотра в детальной карточке
+    readonly_fields = ("fio", "method_label", "voted_method_label")
+
+    # Поля, редактируемые прямо в списке (обязательно должны быть в list_display)
     list_editable = ("detached", "not_going")
+
     list_filter = (
         "method",
         "voted",
@@ -67,5 +67,7 @@ class EmployeeAdmin(admin.ModelAdmin):
         "detached",
         "not_going",
     )
-    search_fields = ("tab_number", "surname", "name", "patronymic")
-    ordering = ("surname", "name")
+
+    # ^ означает поиск "начинается с", что значительно ускоряет запросы к БД
+    search_fields = ("^tab_number", "^surname", "^name", "^patronymic")
+    ordering = ("surname", "name", "patronymic")

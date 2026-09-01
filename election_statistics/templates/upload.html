@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Загрузка данных{% endblock %}
+
 {% block content %}
 {# Шапка страницы: заголовок и общее число работников в базе #}
 <div class="page-header">
@@ -7,50 +8,88 @@
     <span class="row-count-label">в базе работников: {{ counts.method.total }}</span>
 </div>
 
-{# Сообщение об итогах предыдущей загрузки (сколько создано/обновлено строк) #}
-{% if msg %}<div class="ok-msg mb-3">{{ msg }}</div>{% endif %}
+{# Сообщение об итогах предыдущей загрузки (универсальное для обоих типов) #}
+{% if msg %}
+    <div class="ok-msg mb-3">{{ msg }}</div>
+{% endif %}
 
-<div class="narrow">
-    {% comment %} {# Карточка загрузки: форма с файлом, уходит на upload_base.
-      onsubmit вызывает checkFile() — клиентскую проверку перед отправкой. #} {% endcomment %}
-    <div class="card-block">
-        <form method="post" action="{% url 'upload_base' %}" enctype="multipart/form-data"
-              onsubmit="return checkFile()">
-            {% csrf_token %}
-            <div class="file-row">
-                {# accept=".xlsx" — подсказка браузеру, основная проверка всё равно в JS и на сервере #}
-                <input type="file" name="file" accept=".xlsx" class="form-control form-control-sm">
-                <button class="btn-orange" type="submit" id="upload-btn">Загрузить</button>
+<div class="row g-4">
+    {# ========================================================================= #}
+    {# БЛОК 1: Загрузка основной базы сотрудников #}
+    {# ========================================================================= #}
+    <div class="col-md-6">
+        <div class="card-block h-100">
+            <div class="block-title mb-3">1. Загрузка базы сотрудников</div>
+            
+            <form method="post" action="{% url 'upload_base' %}" enctype="multipart/form-data"
+                  onsubmit="return checkFile('file-base', 'btn-base', 'error-base', 'progress-base')">
+                {% csrf_token %}
+                <div class="file-row mb-2">
+                    <input type="file" name="file" id="file-base" accept=".xlsx" class="form-control form-control-sm">
+                    <button class="btn-orange ms-2" type="submit" id="btn-base">Загрузить</button>
+                </div>
+                
+                <div class="fmt-line mb-2">
+                    <span class="fmt-badge">XLSX</span>
+                    <span>Принимается только этот формат. Старый <b>.xls</b> не читается — сохраните файл как «Книга Excel (*.xlsx)».</span>
+                </div>
+                
+                <div id="progress-base" class="hint text-primary" style="display:none">
+                    Идёт разбор файла, подождите...
+                </div>
+                <div id="error-base" class="err-msg mt-2" style="display:none"></div>
+            </form>
+
+            <hr class="my-3">
+            
+            <div class="block-title" style="font-size: 0.9em;">Ожидаемые колонки:</div>
+            <div class="chip-grid mb-2">
+                {% for name in columns %}<span class="chip">{{ name }}</span>{% endfor %}
             </div>
-            {# Памятка по формату: почему не подходит старый .xls и как пересохранить #}
-            <div class="fmt-line">
-                <span class="fmt-badge">XLSX</span>
-                <span>
-                    Принимается только этот формат. Старый <b>.xls</b> не читается —
-                    откройте его в Excel и сохраните заново через
-                    «Сохранить как → Книга Excel (*.xlsx)».
-                </span>
+            <div class="hint" style="font-size: 0.85em;">
+                Порядок колонок не важен, «№ п/п» и «CARD_ID» игнорируются. 
+                Ключ — <b>«Таб№»</b>: повторная загрузка обновляет данные, но <b>не стирает</b> проставленные способ и явку.
             </div>
-            {% comment %} {# Индикатор разбора файла: показывается после успешной проверки,
-              чтобы пользователь не дёргал кнопку повторно #} {% endcomment %}
-            <div id="upload-progress" class="hint" style="display:none">
-                Идёт разбор файла, подождите...
-            </div>
-            {# Блок для текста клиентской ошибки (нет файла / не то расширение) #}
-            <div id="file-error" class="err-msg mt-2" style="display:none"></div>
-        </form>
+        </div>
     </div>
 
-    {# Карточка-справка: какие колонки ожидает файл импорта #}
-    <div class="card-block">
-        <div class="block-title">Колонки файла</div>
-        <div class="chip-grid">
-            {% for name in columns %}<span class="chip">{{ name }}</span>{% endfor %}
-        </div>
-        <div class="hint">
-            Порядок колонок не важен, «№ п/п» и «CARD_ID» не загружаются.
-            Ключ — «Таб№»: повторная загрузка обновляет данные работника и не стирает
-            проставленные способ голосования и явку.
+    {# ========================================================================= #}
+    {# БЛОК 2: Загрузка сводной таблицы выборов (отчет штабу) #}
+    {# ========================================================================= #}
+    <div class="col-md-6">
+        <div class="card-block h-100">
+            <div class="block-title mb-3">2. Загрузка выборов способа голосования</div>
+            
+            <form method="post" action="{% url 'upload_voting_choices' %}" enctype="multipart/form-data"
+                  onsubmit="return checkFile('file-choices', 'btn-choices', 'error-choices', 'progress-choices')">
+                {% csrf_token %}
+                <div class="file-row mb-2">
+                    <input type="file" name="file" id="file-choices" accept=".xlsx" class="form-control form-control-sm">
+                    <button class="btn-orange ms-2" type="submit" id="btn-choices">Загрузить</button>
+                </div>
+                
+                <div class="fmt-line mb-2">
+                    <span class="fmt-badge">XLSX</span>
+                    <span>Формат: «Сводная таблица для отчета штабу по голосованию».</span>
+                </div>
+                
+                <div id="progress-choices" class="hint text-primary" style="display:none">
+                    Идёт разбор файла и обновление способов, подождите...
+                </div>
+                <div id="error-choices" class="err-msg mt-2" style="display:none"></div>
+            </form>
+
+            <hr class="my-3">
+            
+            <div class="block-title" style="font-size: 0.9em;">Как это работает:</div>
+            <div class="hint" style="font-size: 0.85em;">
+                <ul class="mb-0 ps-3">
+                    <li>Система ищет колонки: <b>Таб.№</b>, <b>ФИО</b> и 4 колонки способов голосования.</li>
+                    <li>Если в колонке способа стоит цифра <b>«1»</b>, этот способ назначается сотруднику.</li>
+                    <li>Обновляется <b>только</b> поле «Способ голосования». Остальные данные (адрес, УИК и т.д.) не меняются.</li>
+                    <li>Если сотрудник с таким Таб.№ не найден, он будет создан с минимальными данными (ФИО и способ).</li>
+                </ul>
+            </div>
         </div>
     </div>
 </div>
@@ -58,40 +97,43 @@
 
 {% block scripts %}
 <script>
-// Клиентская проверка файла перед отправкой формы.
-// Возвращает false (отмена submit), если файл не прикреплён или расширение не .xlsx;
-// иначе блокирует кнопку, показывает индикатор разбора и разрешает отправку.
-function checkFile() {
-    var input = document.querySelector('input[name="file"]');
-    var err = document.getElementById('file-error');
+/**
+ * Универсальная клиентская проверка файла перед отправкой формы.
+ * @param {string} inputId - ID поля input type="file"
+ * @param {string} btnId - ID кнопки отправки
+ * @param {string} errorId - ID блока для вывода ошибки
+ * @param {string} progressId - ID блока индикатора загрузки
+ */
+function checkFile(inputId, btnId, errorId, progressId) {
+    var input = document.getElementById(inputId);
+    var err = document.getElementById(errorId);
 
-    // Показывает текст ошибки и отменяет отправку формы
     function fail(text) {
         err.textContent = text;
         err.style.display = 'block';
         return false;
     }
 
-    // Файл вообще не выбран
+    // Файл не выбран
     if (!input.files || !input.files.length) {
         return fail('Файл не прикреплён — выберите .xlsx перед загрузкой');
     }
 
-    // Проверка расширения: принимаем только .xlsx
+    // Проверка расширения
     var name = input.files[0].name;
     if (!name.toLowerCase().endsWith('.xlsx')) {
         var ext = name.indexOf('.') >= 0 ? name.slice(name.lastIndexOf('.')) : 'без расширения';
         return fail('Это ' + ext + ', а нужен .xlsx — пересохраните файл в Excel');
     }
 
-    // Всё в порядке: гасим ошибку, блокируем кнопку от повторных нажатий
-    // и показываем индикатор разбора файла
+    // Всё в порядке: скрываем ошибку, блокируем кнопку, показываем прогресс
     err.style.display = 'none';
-    var btn = document.getElementById('upload-btn');
+    var btn = document.getElementById(btnId);
     btn.disabled = true;
-    btn.textContent = 'Загрузка...';
-    document.getElementById('upload-progress').style.display = 'block';
-    return true;
+    btn.textContent = 'Обработка...';
+    document.getElementById(progressId).style.display = 'block';
+    
+    return true; // Разрешаем отправку формы
 }
 </script>
 {% endblock %}
