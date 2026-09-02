@@ -1,32 +1,58 @@
+"""
+Сборщик zip-архивов в памяти.
+
+Используется для выгрузки отчётов по цехам: один .xlsx на цех
+внутри одного архива. Файлы накапливаются в словаре и упаковываются
+одним вызовом build() / build_bytes().
+"""
+
 import io
 import zipfile
 from pathlib import PurePosixPath
-from typing import Optional
+from typing import Any, Optional
 
 
 class ArchiveError(Exception):
     """Ошибка работы с архивом: пустое имя, дубликат файла, пустая сборка."""
 
-    pass
-
 
 class ReportArchiver:
     """
-    Сборщик zip-архива из книг openpyxl и произвольных байтов в памяти.
+    Сборщик zip-архива из книг openpyxl и произвольных байтов.
+
     Файлы накапливаются в словаре и упаковываются одним вызовом build().
-    Используется для выгрузки отчётов по цехам (один .xlsx на цех).
+    Повторное имя без overwrite=True вызывает ArchiveError — совпадающие
+    имена вызывающий код разводит суффиксом сам.
     """
 
     def __init__(self, compression: int = zipfile.ZIP_DEFLATED):
+        """
+        Создаёт пустой сборщик.
+
+        Аргументы:
+            compression: алгоритм сжатия zipfile. По умолчанию deflate;
+                для архивов из чистых .xlsx (которые сами уже zip)
+                ZIP_STORED быстрее при почти том же размере.
+        """
         # {путь внутри архива: содержимое в байтах}
         self._files: dict[str, bytes] = {}
-        # Алгоритм сжатия для zipfile (по умолчанию deflate)
         self._compression = compression
 
     def _key(self, filename: str, folder: Optional[str]) -> str:
         """
         Собирает путь файла внутри архива из папки и имени.
-        Путь нормализуется в posix-вид (слэши), пустое имя — ошибка.
+
+        Путь нормализуется в posix-вид (слэши).
+
+        Аргументы:
+            filename: имя файла, непустое.
+            folder: необязательная папка внутри архива.
+
+        Возвращает:
+            Нормализованный путь внутри архива.
+
+        Исключения:
+            ArchiveError: если имя файла пустое.
         """
         if not filename:
             raise ArchiveError("Имя файла не может быть пустым")
@@ -41,9 +67,20 @@ class ReportArchiver:
         overwrite: bool = False,
     ) -> "ReportArchiver":
         """
-        Добавляет файл в будущий архив. Возвращает self для цепочки вызовов.
-        Без overwrite=True повторное имя вызывает ArchiveError —
-        вызывающий код сам разводит совпадающие имена суффиксом.
+        Добавляет файл в будущий архив.
+
+        Аргументы:
+            filename: имя файла внутри архива.
+            content: содержимое файла в байтах.
+            folder: необязательная папка внутри архива.
+            overwrite: разрешить перезапись существующего имени
+                (по умолчанию повторное имя — ошибка).
+
+        Возвращает:
+            self — для цепочки вызовов.
+
+        Исключения:
+            ArchiveError: имя уже добавлено и overwrite=False.
         """
         key = self._key(filename, folder)
         if key in self._files and not overwrite:
@@ -53,13 +90,22 @@ class ReportArchiver:
 
     def add_workbook(
         self,
-        workbook,
+        workbook: Any,
         filename: str,
         folder: Optional[str] = None,
         overwrite: bool = False,
     ) -> "ReportArchiver":
         """
-        Сохраняет книгу openpyxl в байты и кладёт её в архив как .xlsx-файл.
+        Сохраняет книгу openpyxl в байты и кладёт её в архив как .xlsx.
+
+        Аргументы:
+            workbook: объект openpyxl Workbook.
+            filename: имя файла внутри архива.
+            folder: необязательная папка внутри архива.
+            overwrite: разрешить перезапись существующего имени.
+
+        Возвращает:
+            self — для цепочки вызовов.
         """
         buffer = io.BytesIO()
         workbook.save(buffer)
@@ -69,18 +115,29 @@ class ReportArchiver:
 
     @property
     def file_count(self) -> int:
-        """Сколько файлов накоплено в архиве (для проверки "архив пустой")."""
+        """
+        Возвращает:
+            Сколько файлов накоплено — для проверки «архив пустой».
+        """
         return len(self._files)
 
     @property
     def filenames(self) -> list[str]:
-        """Список путей файлов внутри архива (для диагностики и тестов)."""
+        """
+        Возвращает:
+            Список путей файлов внутри архива — для диагностики и тестов.
+        """
         return list(self._files)
 
     def build(self) -> io.BytesIO:
         """
-        Упаковывает накопленные файлы в zip и возвращает буфер,
-        готовый к чтению (seek(0)). Пустой архив — ошибка ArchiveError.
+        Упаковывает накопленные файлы в zip.
+
+        Возвращает:
+            Буфер, готовый к чтению (seek(0)).
+
+        Исключения:
+            ArchiveError: если не добавлено ни одного файла.
         """
         if not self._files:
             raise ArchiveError("Нечего собирать в архив")
@@ -93,7 +150,9 @@ class ReportArchiver:
 
     def build_bytes(self) -> bytes:
         """
-        Собирает архив и отдаёт его содержимое как байты —
-        удобно сразу положить в HttpResponse.
+        Собирает архив и отдаёт его содержимое как байты.
+
+        Возвращает:
+            Байты zip-архива — можно сразу класть в HttpResponse.
         """
         return self.build().getvalue()

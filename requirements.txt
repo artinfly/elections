@@ -1,8 +1,24 @@
-asgiref==3.11.1
+# ==============================================================================
+# Запуск приложения (Django + PostgreSQL + Excel)
+# ==============================================================================
 Django==6.0.2
-et-xmlfile==2.0.0
+asgiref==3.11.1            # зависимость Django
+sqlparse==0.5.5            # зависимость Django
+tzdata==2025.3             # зависимость Django на Windows (часовые пояса)
 openpyxl==3.1.5
+et-xmlfile==2.0.0          # зависимость openpyxl
 psycopg2-binary==2.9.11
-sqlparse==0.5.5
-tzdata==2025.3
 whitenoise==6.12.0
+
+# ==============================================================================
+# Разработка (форматирование кода)
+# ==============================================================================
+black==26.5.1
+isort==8.0.1
+click==8.4.2               # зависимость black
+colorama==0.4.6            # зависимость click на Windows
+mypy-extensions==1.1.0     # зависимость black
+packaging==26.2            # зависимость black
+pathspec==1.1.1            # зависимость black
+platformdirs==4.10.1       # зависимость black
+pytokens==0.4.1            # зависимость black (токенайзер) # python -m pip install --no-index --find-links wheels -r requirements.t

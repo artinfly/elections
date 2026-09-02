@@ -1,19 +1,35 @@
 """
-Модуль для импорта и обновления данных сотрудников из Excel-файлов.
+Модуль импорта и обновления данных сотрудников из Excel-файлов.
+
+Два формата входа: основная база сотрудников (import_base) и отчёт штаба
+с выбранными способами голосования (import_voting_choices).
+Плюс массовая простановка явки (set_turnout, mark_voted).
 """
 
-from typing import Any, Iterator, Tuple
+from typing import Any, Iterator
 
 from django.db.models import F
 from django.utils import timezone
-from openpyxl import load_workbook  # ИСПРАВЛЕНО: вынесено на верхний уровень
 
 from .helpers import BATCH, COLUMNS, _date, _header, _sheet, _text
 from .models import Employee
 
+# ==============================================================================
+# Импорт основной базы
+# ==============================================================================
+
 
 def _rows_by_tab(rows: Iterator, positions: dict) -> dict:
-    """Разбирает строки файла в словарь {табельный номер: значения полей}. Дубликаты перезаписываются."""
+    """
+    Разбирает строки файла в словарь {табельный номер: значения полей}.
+
+    Аргументы:
+        rows: итератор строк листа.
+        positions: {имя_колонки: индекс} из _header.
+
+    Возвращает:
+        Словарь по табельному номеру; дубликаты строк в файле перезаписываются.
+    """
     parsed = {}
     for row in rows:
         if not any(row):
@@ -30,7 +46,17 @@ def _rows_by_tab(rows: Iterator, positions: dict) -> dict:
 
 
 def _known_rows(tabs: list, fields: list) -> dict:
-    """Подтягивает существующих сотрудников из БД чанками по 2000 записей для экономии памяти."""
+    """
+    Подтягивает существующих сотрудников из БД чанками по 2000,
+    чтобы не держать в памяти всю таблицу сразу.
+
+    Аргументы:
+        tabs: список табельных номеров из файла.
+        fields: какие поля достать для сравнения.
+
+    Возвращает:
+        Словарь {табельный номер: {"pk": ..., поля...}}.
+    """
     known = {}
     tabs = list(tabs)
     for start in range(0, len(tabs), 2000):
@@ -42,10 +68,21 @@ def _known_rows(tabs: list, fields: list) -> dict:
     return known
 
 
-def import_base(upload: Any) -> Tuple[int, int, int]:
+def import_base(upload: Any) -> tuple[int, int, int]:
     """
     Импорт основной базы сотрудников.
-    :return: кортеж (создано, обновлено, всего строк)
+
+    Повторная загрузка обновляет изменившиеся строки и не трогает
+    способ голосования, явку и производство: этих колонок нет в файле.
+
+    Аргументы:
+        upload: файл или поток с xlsx.
+
+    Возвращает:
+        Кортеж (создано, обновлено, всего строк).
+
+    Исключения:
+        ValueError: битый файл или не найдена колонка "Таб№".
     """
     with _sheet(upload) as rows:
         positions = _header(rows, COLUMNS)
@@ -65,6 +102,7 @@ def import_base(upload: Any) -> Tuple[int, int, int]:
         if current is None:
             fresh.append(Employee(tab_number=tab, **values))
         elif any(current[field] != values[field] for field in fields):
+            # В UPDATE попадают только реально изменившиеся строки
             stale.append(Employee(pk=current["pk"], tab_number=tab, **values))
 
     if fresh:
@@ -75,8 +113,25 @@ def import_base(upload: Any) -> Tuple[int, int, int]:
     return len(fresh), len(stale), len(parsed)
 
 
-def set_turnout(queryset, voted: bool = True):
-    """Массово проставляет явку одним UPDATE-запросом через F-выражение."""
+# ==============================================================================
+# Отметки явки
+# ==============================================================================
+
+
+def set_turnout(queryset: Any, voted: bool = True) -> int:
+    """
+    Массово проставляет явку одним UPDATE-запросом.
+
+    При отметке явки место голосования копируется из плана (method),
+    при снятии — очищается; сам план не меняется.
+
+    Аргументы:
+        queryset: QuerySet сотрудников для отметки.
+        voted: True — отметить явку, False — снять.
+
+    Возвращает:
+        Число изменённых строк.
+    """
     return queryset.update(
         voted=voted,
         voted_at=timezone.now() if voted else None,
@@ -84,8 +139,17 @@ def set_turnout(queryset, voted: bool = True):
     )
 
 
-def mark_voted(tabs: list, voted: bool = True) -> Tuple[int, int]:
-    """Отмечает явку по списку табельных номеров. Возвращает (успешно, не найдено)."""
+def mark_voted(tabs: list, voted: bool = True) -> tuple[int, int]:
+    """
+    Отмечает явку по списку табельных номеров.
+
+    Аргументы:
+        tabs: список табельных номеров (пустые значения игнорируются).
+        voted: True — отметить, False — снять.
+
+    Возвращает:
+        Кортеж (изменено, не найдено в базе).
+    """
     tabs = {t for t in tabs if t}
     if not tabs:
         return 0, 0
@@ -98,6 +162,7 @@ def mark_voted(tabs: list, voted: bool = True) -> Tuple[int, int]:
 # Импорт нового формата: "Сводная таблица для отчета штабу"
 # ==============================================================================
 
+# Маркеры колонок отчёта штаба: способ голосования определяется отметкой "1"
 NEW_FORMAT_COLUMNS = {
     "Таб.№": "tab_number",
     "ФИО": "fio_raw",
@@ -108,35 +173,31 @@ NEW_FORMAT_COLUMNS = {
 }
 
 
-def _parse_fio(fio_str: str) -> Tuple[str, str, str]:
-    """Разбирает ФИО из одной строки на (Фамилия, Имя, Отчество)."""
-    parts = str(fio_str).strip().split()
-    if len(parts) >= 3:
-        return parts[0], parts[1], parts[2]
-    elif len(parts) == 2:
-        return parts[0], parts[1], ""
-    elif len(parts) == 1:
-        return parts[0], "", ""
-    return "", "", ""
-
-
-def import_voting_choices(upload: Any) -> Tuple[int, int, int]:
+def import_voting_choices(upload: Any) -> tuple[int, int, int]:
     """
-    Импорт выборов способа голосования из отчета штаба.
-    Обновляет поле `method` у существующих сотрудников.
-    :return: кортеж (обновлено, всего обработано строк, ошибок)
-    """
-    try:
-        book = load_workbook(upload, read_only=True, data_only=True)
-        sheet = book.active
-    except Exception:
-        raise ValueError("Ошибка: не удалось открыть Excel файл")
+    Импорт способов голосования из отчёта штаба.
 
-    all_rows = list(sheet.iter_rows(values_only=True))
+    Обновляет поле method у существующих сотрудников. Сотрудники, которых
+    нет в базе, НЕ создаются: без department, okrug и uik они сломали бы
+    отчёты по цехам и округам — такая строка считается ошибкой.
+
+    Аргументы:
+        upload: файл или поток с xlsx.
+
+    Возвращает:
+        Кортеж (обновлено, всего строк, ошибок/пропусков).
+
+    Исключения:
+        ValueError: битый или пустой файл, не найдены обязательные колонки.
+    """
+    # _sheet гарантирует закрытие книги даже при ошибке
+    with _sheet(upload) as rows:
+        all_rows = list(rows)
+
     if not all_rows:
         raise ValueError("Ошибка: файл пустой")
 
-    # Поиск строки заголовка
+    # Строка заголовка ищется по маркерам, её положение в файле не фиксировано
     header_row_idx = 0
     for idx, row in enumerate(all_rows):
         cells = [str(cell or "").strip() for cell in row if cell is not None]
@@ -147,7 +208,7 @@ def import_voting_choices(upload: Any) -> Tuple[int, int, int]:
     if header_row_idx >= len(all_rows) - 1:
         raise ValueError("Ошибка: не найдена строка с данными")
 
-    # Определение индексов колонок
+    # Заголовок может быть частью более длинного текста — ищем по вхождению
     header_row = all_rows[header_row_idx]
     col_indices = {}
     for idx, cell in enumerate(header_row):
@@ -178,8 +239,7 @@ def import_voting_choices(upload: Any) -> Tuple[int, int, int]:
     total = 0
     errors = 0
 
-    for row_idx in range(header_row_idx + 1, len(all_rows)):
-        row = all_rows[row_idx]
+    for row in all_rows[header_row_idx + 1 :]:
         if not any(row):
             continue
 
@@ -191,41 +251,35 @@ def import_voting_choices(upload: Any) -> Tuple[int, int, int]:
             if not tab_number:
                 continue
 
-            fio_col = col_indices["ФИО"]
-            fio_raw = _text(row[fio_col] if fio_col < len(row) else None)
-            surname, name, patronymic = _parse_fio(fio_raw)
-
-            # Поиск выбранного способа (ищем "1")
+            # Способ определяется отметкой "1"; две единицы в строке — ошибка
             selected_method = ""
             for method_code, col_idx in method_cols.items():
                 if col_idx is not None and col_idx < len(row):
-                    cell_value = _text(row[col_idx])
-                    if cell_value == "1":
-                        if (
-                            selected_method
-                        ):  # Две единицы в одной строке - ошибка формата
+                    if _text(row[col_idx]) == "1":
+                        if selected_method:
                             errors += 1
                             selected_method = ""
                             break
                         selected_method = method_code
 
+            # Строки без способа учитываются в пропусках, но не как ошибки
             if not selected_method:
-                continue  # Если способ не указан, пропускаем строку
+                continue
 
-            # Обновление или создание записи
             try:
                 employee = Employee.objects.get(tab_number=tab_number)
-                employee.method = selected_method
-                employee.save(update_fields=["method"])
-                updated += 1
             except Employee.DoesNotExist:
-                # ИСПРАВЛЕНО: Мы НЕ создаем новые записи здесь, так как без department, okrug и uik
-                # сотрудник "сломает" отчеты по цехам и округам. Это считается ошибкой импорта.
+                # Не создаём "обрывков" без цеха и округа — см. docstring
                 errors += 1
+                continue
+
+            employee.method = selected_method
+            employee.save(update_fields=["method"])
+            updated += 1
 
         except Exception:
+            # Одна битая строка не должна останавливать весь импорт
             errors += 1
             continue
 
-    book.close()
     return updated, total, errors

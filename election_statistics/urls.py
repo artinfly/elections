@@ -1,32 +1,39 @@
+"""
+Маршруты приложения election_statistics.
+
+Подключаются из корня проекта (elections/urls.py) через include.
+Все маршруты имеют name — используется для redirect() в views и шаблонах.
+"""
+
 from django.urls import path
 
 from . import views
 
 urlpatterns = [
-    # =========================================================================
+    # ==============================================================================
     # Аутентификация
-    # =========================================================================
+    # ==============================================================================
     path("login/", views.login_view, name="login"),
     path("logout/", views.logout_view, name="logout"),
-    # =========================================================================
+    # ==============================================================================
     # Основные страницы
-    # =========================================================================
+    # ==============================================================================
     path("", views.method_page, name="method"),
     path("elections/", views.elections_page, name="elections"),
     path("upload/", views.upload_page, name="upload"),
     path("export/", views.export_page, name="export"),
-    # =========================================================================
-    # Загрузка данных (Operator only)
-    # =========================================================================
+    # ==============================================================================
+    # Загрузка данных
+    # ==============================================================================
     path("upload/base/", views.upload_base, name="upload_base"),
     path(
         "upload/voting-choices/",
         views.upload_voting_choices,
         name="upload_voting_choices",
     ),
-    # =========================================================================
-    # Экспорт отчетов (Standard)
-    # =========================================================================
+    # ==============================================================================
+    # Экспорт отчетов
+    # ==============================================================================
     path("export/employees/", views.export_employees, name="export_employees"),
     path("export/summary/", views.export_summary, name="export_summary"),
     path(
@@ -51,16 +58,15 @@ urlpatterns = [
         views.export_method_archive,
         name="export_method_archive",
     ),
-    # Экспорт отчетов (Custom / Filtered)
     path("export/custom/", views.export_custom_report, name="export_custom"),
     path(
         "export/custom-archive/",
         views.export_custom_archive,
         name="export_custom_archive",
     ),
-    # =========================================================================
-    # API (AJAX endpoints)
-    # =========================================================================
+    # ==============================================================================
+    # API
+    # ==============================================================================
     path("api/method/", views.api_method, name="api_method"),
     path("api/mark/", views.api_mark, name="api_mark"),
     path("api/voted/", views.api_voted, name="api_voted"),

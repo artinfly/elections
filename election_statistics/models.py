@@ -1,3 +1,12 @@
+"""
+Модели приложения election_statistics.
+
+Единственная таблица — Employee: личные данные сотрудника, адрес,
+привязка к УИК и округу, план и факт голосования.
+Здесь же — коды способов голосования, которые используют views,
+отчёты, импортеры и шаблоны.
+"""
+
 from django.db import models
 
 # Коды способов голосования — короткие значения, которые хранятся в базе
@@ -5,8 +14,10 @@ DEG = "deg"
 UIK = "uik"
 UVZ = "uvz"
 UIK19 = "u19"
+
 # Пары (код, подпись) для choices в модели и для выпадающих списков в шаблонах
 METHODS = [(DEG, "ДЭГ"), (UIK, "УИК"), (UVZ, "УИК-УВЗ"), (UIK19, "УИК-19")]
+
 # Словарь код -> человекочитаемая подпись для отображения в таблицах и отчётах
 METHOD_LABELS = dict(METHODS)
 
@@ -14,6 +25,7 @@ METHOD_LABELS = dict(METHODS)
 class Employee(models.Model):
     """
     Сотрудник — единственная таблица базы.
+
     Хранит личные данные, адрес, привязку к УИК и округу,
     запланированный способ голосования и отметки явки.
     """
@@ -22,10 +34,14 @@ class Employee(models.Model):
     tab_number = models.CharField("Таб№", max_length=20, unique=True)
     # Цех (подразделение) — основная группировка в отчётах по цехам
     department = models.CharField("Подразделение", max_length=50, db_index=True)
-    # Производство — группа цехов для отчётов "по производствам"
+    # Производство из внешней базы (import_workshops);
+    # используется как фильтр на страницах. Внимание: отчёты
+    # «по производствам» группируются по полю service — см. комментарий
+    # в reports.py, не «исправлять» без синхронного переименования
     production = models.CharField(
         "Производство", max_length=200, blank=True, db_index=True
     )
+    # Служба; именно по этому полю группируются отчёты «по производствам»
     service = models.CharField("Служба", max_length=200, blank=True, db_index=True)
     surname = models.CharField("Фамилия", max_length=100)
     name = models.CharField("Имя", max_length=100)
@@ -48,10 +64,10 @@ class Employee(models.Model):
         "Способ голосования", max_length=3, choices=METHODS, blank=True, db_index=True
     )
     # Отметка явки: проголосовал ли сотрудник
-    voted = models.BooleanField("Проголосовал", default=False, db_index=True)
+    voted = models.BooleanField("Проголосал", default=False, db_index=True)
     # Способ, которым сотрудник фактически проголосовал (заполняется при voted=True)
     voted_method = models.CharField(
-        "Где проголосовал", max_length=3, choices=METHODS, blank=True, db_index=True
+        "Где голосовал", max_length=3, choices=METHODS, blank=True, db_index=True
     )
     # Время, когда была проставлена отметка явки
     voted_at = models.DateTimeField("Время отметки", null=True, blank=True)
@@ -65,24 +81,39 @@ class Employee(models.Model):
     class Meta:
         verbose_name = "Сотрудник"
         verbose_name_plural = "Сотрудники"
-        # Сортировка по умолчанию — по ФИО
+        # Сортировка по умолчанию — по ФИО.
+        # Важно: в агрегирующих запросах (.values().annotate()) эту сортировку
+        # нужно сбрасывать пустым .order_by(), иначе поля сортировки попадут
+        # в GROUP BY и разобьют группы. В reports.py сброс уже стоит.
         ordering = ["surname", "name", "patronymic"]
 
     @property
-    def fio(self):
-        """ФИО одной строкой, из непустых частей."""
+    def fio(self) -> str:
+        """
+        Возвращает:
+            ФИО одной строкой, из непустых частей.
+        """
         return " ".join(filter(None, [self.surname, self.name, self.patronymic]))
 
     @property
-    def method_label(self):
-        """Человекочитаемая подпись запланированного способа голосования."""
+    def method_label(self) -> str:
+        """
+        Возвращает:
+            Человекочитаемая подпись запланированного способа голосования.
+        """
         return METHOD_LABELS.get(self.method, "")
 
     @property
-    def voted_method_label(self):
-        """Человекочитаемая подпись фактического способа голосования."""
+    def voted_method_label(self) -> str:
+        """
+        Возвращает:
+            Человекочитаемая подпись фактического способа голосования.
+        """
         return METHOD_LABELS.get(self.voted_method, "")
 
-    def __str__(self):
-        """Строковое представление для админки и списков."""
+    def __str__(self) -> str:
+        """
+        Возвращает:
+            Строковое представление для админки и списков: "Таб№ ФИО".
+        """
         return f"{self.tab_number} {self.fio}"

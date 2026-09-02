@@ -1,10 +1,25 @@
+"""
+Настройки проекта.
+
+"""
+
 from pathlib import Path
 
+# ==============================================================================
+# База
+# ==============================================================================
+
+# Корень проекта — папка, в которой лежит manage.py
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Ключ для dev; на сервере должен быть собственный
 SECRET_KEY = "django-insecure-%r9ot_pgbi2=6$=i&yt0m@l7i4t4*1=vso8%a7678!lsry4k2k"
 DEBUG = True
 ALLOWED_HOSTS = ["localhost", "127.0.0.1", "testserver"]
+
+# ==============================================================================
+# Приложения и middleware
+# ==============================================================================
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -17,8 +32,11 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    # Стоит первым: ответ обрабатывается снизу вверх,
+    # поэтому сжимается уже готовая страница
     "django.middleware.gzip.GZipMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    # Отдаёт статику; в DEBUG берёт файлы из исходников через finders
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -48,6 +66,11 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "elections.wsgi.application"
 
+# ==============================================================================
+# База данных
+# ==============================================================================
+
+# Dev-база; на сервере меняются имя, пользователь, пароль и хост
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
@@ -56,27 +79,49 @@ DATABASES = {
         "PASSWORD": "root",
         "HOST": "localhost",
         "PORT": "5432",
+        # Кириллица в базе без сюрпризов с кодировкой
         "OPTIONS": {"client_encoding": "UTF8"},
     }
 }
 
+# ==============================================================================
+# Аутентификация
+# ==============================================================================
+
 AUTH_PASSWORD_VALIDATORS = [
     {
-        "NAME": "django.contrib.auth.password_validation."
-        "UserAttributeSimilarityValidator"
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
     },
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
+# Куда попадёт пользователь после входа/выхода,
+# если в ссылке не указан next
+LOGIN_URL = "/login/"
+LOGIN_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = "/login/"
+
+# ==============================================================================
+# Локализация и время
+# ==============================================================================
+
 LANGUAGE_CODE = "ru-ru"
 TIME_ZONE = "Asia/Yekaterinburg"
 USE_I18N = True
 USE_TZ = True
 
+# ==============================================================================
+# Статика и загрузка файлов
+# ==============================================================================
+
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# В DEBUG — обычное хранилище, собирать ничего не нужно.
+# В проде — whitenoise со сжатием и хешами в именах,
+# поэтому предварительно запускается collectstatic
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {
@@ -87,13 +132,16 @@ STORAGES = {
         )
     },
 }
+
+# Dev-флаги whitenoise: статика из исходников и подхват изменений без collectstatic
 WHITENOISE_USE_FINDERS = DEBUG
 WHITENOISE_AUTOREFRESH = DEBUG
 
+# Файл до этого размера держится в памяти, крупнее — пишется во временный
 FILE_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024
 
-DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+# ==============================================================================
+# Прочее
+# ==============================================================================
 
-LOGIN_URL = "/login/"
-LOGIN_REDIRECT_URL = "/"
-LOGOUT_REDIRECT_URL = "/login/"
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

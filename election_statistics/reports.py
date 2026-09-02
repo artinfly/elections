@@ -1,3 +1,12 @@
+"""
+Стандартные Excel-отчёты и архивы по цехам.
+
+Здесь все «бумажные» отчёты: разделение по производствам, способы
+голосования по производствам, сводная таблица, полная выгрузка,
+отчёт по одному цеху и ZIP-архивы на их основе.
+Сводный отчёт по фильтрам (конструктор) — в custom_reports.py.
+"""
+
 from datetime import datetime
 from typing import Any, Optional
 
@@ -10,21 +19,62 @@ from openpyxl.utils import get_column_letter
 from utils.archiver import ReportArchiver
 
 from .helpers import (
+    COLUMNS,
     NO_PRODUCTION,
     REPORT_MODES,
+    REPORT_WIDTHS,
     _apply_border,
     _by_number,
     _format_with_percent,
     department_file_name,
     padded_number,
 )
-from .models import DEG, UIK, UIK19, UVZ, Employee
+from .models import DEG, METHOD_LABELS, UIK, UIK19, UVZ, Employee
+
+# ==============================================================================
+# Вспомогательные функции
+# ==============================================================================
+
+
+def _unique_name(taken: set, name: str) -> str:
+    """
+    Возвращает имя, которого ещё нет в наборе занятых имён.
+
+    При совпадении добавляет суффикс -2, -3, ... и регистрирует
+    результат в наборе.
+
+    Аргументы:
+        taken: набор уже занятых имён (мутирует).
+        name: желаемое имя файла.
+
+    Возвращает:
+        Уникальное имя.
+    """
+    unique, attempt = name, 2
+    while unique in taken:
+        unique = f"{name}-{attempt}"
+        attempt += 1
+    taken.add(unique)
+    return unique
 
 
 def _share_row(
     sheet: Any, line: int, label: str, people: int, came: int, bold: Any = None
 ) -> int:
-    """Пишет строку отчёта по производствам."""
+    """
+    Пишет строку отчёта по производствам: всего / проголосовало / процент.
+
+    Аргументы:
+        sheet: лист openpyxl.
+        line: номер строки для записи.
+        label: подпись строки (цех, "Итого", "Всего").
+        people: всего людей.
+        came: проголосовало.
+        bold: жирный шрифт для итоговых строк (None — обычный).
+
+    Возвращает:
+        Номер следующей строки.
+    """
     cells = (
         sheet.cell(line, 1, label),
         sheet.cell(line, 2, people),
@@ -40,11 +90,64 @@ def _share_row(
     return line + 1
 
 
+def _method_share_row(
+    sheet: Any,
+    line: int,
+    label: str,
+    people: int,
+    deg: int,
+    uik: int,
+    uvz: int,
+    u19: int,
+    bold: Any = None,
+) -> int:
+    """
+    Пишет строку отчёта по способам голосования.
+
+    Аргументы:
+        sheet: лист openpyxl.
+        line: номер строки для записи.
+        label: подпись строки.
+        people: всего людей.
+        deg/uik/uvz/u19: планы по способам.
+        bold: жирный шрифт для итоговых строк (None — обычный).
+
+    Возвращает:
+        Номер следующей строки.
+    """
+    chosen = deg + uik + uvz + u19
+    cells = (
+        sheet.cell(line, 1, label),
+        sheet.cell(line, 2, people),
+        sheet.cell(line, 3, deg),
+        sheet.cell(line, 4, uik),
+        sheet.cell(line, 5, uvz),
+        sheet.cell(line, 6, u19),
+        sheet.cell(line, 7, chosen),
+        sheet.cell(line, 8, chosen / people if people else 0),
+    )
+    for cell in cells[1:]:
+        cell.alignment = Alignment(horizontal="center")
+    cells[7].number_format = "0.00%"
+    if bold:
+        for cell in cells:
+            cell.font = bold
+    return line + 1
+
+
+# ==============================================================================
+# Отчёты по производствам
+# ==============================================================================
+
+
 def production_table() -> Any:
     """
     Отчёт "Разделение по производствам (Голосование)":
     цеха сгруппированы по производствам, для каждого — всего/проголосовало/процент.
     """
+    # Бизнес-колонка «Производство» в отчётах строится по полю service.
+    # Это историческое расхождение имён, переименование шаблонов и README —
+    # отдельно. НЕ «исправлять» на production: логика согласована с данными.
     grouped = {}
     for row in (
         Employee.objects.exclude(department="")
@@ -82,6 +185,7 @@ def production_table() -> Any:
 
     line = 3
     total_people = total_came = 0
+    # "Без производства" всегда последняя группа
     for production in sorted(grouped, key=lambda name: (name == NO_PRODUCTION, name)):
         sheet.merge_cells(start_row=line, start_column=1, end_row=line, end_column=4)
         sheet.cell(line, 1, production).font = bold
@@ -109,42 +213,15 @@ def production_table() -> Any:
     return book
 
 
-def _method_share_row(
-    sheet: Any,
-    line: int,
-    label: str,
-    people: int,
-    deg: int,
-    uik: int,
-    uvz: int,
-    u19: int,
-    bold: Any = None,
-) -> int:
-    """Пишет строку отчёта по способам голосования."""
-    chosen = deg + uik + uvz + u19
-    cells = (
-        sheet.cell(line, 1, label),
-        sheet.cell(line, 2, people),
-        sheet.cell(line, 3, deg),
-        sheet.cell(line, 4, uik),
-        sheet.cell(line, 5, uvz),
-        sheet.cell(line, 6, u19),
-        sheet.cell(line, 7, chosen),
-        sheet.cell(line, 8, chosen / people if people else 0),
-    )
-    for cell in cells[1:]:
-        cell.alignment = Alignment(horizontal="center")
-    cells[7].number_format = "0.00%"
-    if bold:
-        for cell in cells:
-            cell.font = bold
-    return line + 1
-
-
 def production_method_table(exclude_u19: bool = False) -> Any:
     """
     Отчёт "Способы голосования по производствам".
-    Если exclude_u19=True, из выборки исключаются сотрудники 19 округа.
+
+    Аргументы:
+        exclude_u19: если True, сотрудники 19 округа не учитываются.
+
+    Возвращает:
+        Книга openpyxl с отчётом.
     """
     grouped = {}
     base_qs = Employee.objects.exclude(department="")
@@ -188,7 +265,7 @@ def production_method_table(exclude_u19: bool = False) -> Any:
         ("E2", "УИК-УВЗ"),
         ("F2", "УИК-19"),
         ("G1", "Итог"),
-        ("G2", "Кол-во зарегестрированных"),
+        ("G2", "Кол-во зарегистрированных"),
         ("H2", "%"),
     ):
         cell = sheet[coordinate]
@@ -250,15 +327,27 @@ def production_method_table(exclude_u19: bool = False) -> Any:
     return book
 
 
+# ==============================================================================
+# Сводная таблица
+# ==============================================================================
+
+
 def summary_table(
     group_field: str = "department",
     group_title: str = "Подразделение",
     exclude_u19: bool = False,
 ) -> Any:
     """
-    Сводная таблица по цехам: строка на цех — всего людей, планы по способам,
+    Сводная таблица: строка на группу — всего людей, планы по способам,
     проголосовавшие и процент явки. Внизу строка "Итого".
-    Если exclude_u19=True, исключаются сотрудники 19 округа.
+
+    Аргументы:
+        group_field: поле группировки ("department", "uik", ...).
+        group_title: заголовок первой колонки.
+        exclude_u19: если True, сотрудники 19 округа не учитываются.
+
+    Возвращает:
+        Книга openpyxl со сводкой.
     """
     base_qs = Employee.objects.exclude(**{group_field: ""})
     if exclude_u19:
@@ -316,6 +405,7 @@ def summary_table(
             row["plan_u19"],
             row["came"],
         )
+        # Номера цехов дополняются до 3 цифр, прочие группы пишутся как есть
         label = (
             padded_number(row[group_field])
             if group_field == "department"
@@ -348,17 +438,39 @@ def summary_table(
     return book
 
 
-def export_xlsx() -> Any:
-    """Полная выгрузка всех сотрудников в Excel."""
-    from .helpers import COLUMNS
-    from .models import METHOD_LABELS
+def summary_table_no_u19(
+    group_field: str = "department", group_title: str = "Подразделение"
+) -> Any:
+    """
+    Обёртка для обратной совместимости: сводная таблица без 19 округа.
 
+    Возвращает:
+        Книга openpyxl со сводкой без сотрудников 19 округа.
+    """
+    return summary_table(
+        group_field=group_field, group_title=group_title, exclude_u19=True
+    )
+
+
+# ==============================================================================
+# Полная выгрузка и отчёт по цеху
+# ==============================================================================
+
+
+def export_xlsx() -> Any:
+    """
+    Полная выгрузка всех сотрудников в Excel.
+
+    Возвращает:
+        Книга openpyxl: все колонки загрузки плюс план, явка и место.
+    """
     book = openpyxl.Workbook()
     sheet = book.active
     sheet.title = "Сотрудники"
     sheet.append(list(COLUMNS) + ["Способ (план)", "Проголосовал", "Где голосовал"])
     fields = list(COLUMNS.values())
 
+    # iterator с chunk_size не держит всю таблицу в памяти
     for person in (
         Employee.objects.all()
         .order_by("department", "surname", "name", "patronymic")
@@ -375,9 +487,17 @@ def export_xlsx() -> Any:
 def department_report(
     department: str, moment: Optional[datetime] = None, mode: str = "turnout"
 ) -> Any:
-    """Формирует Excel-отчёт по одному цеху."""
-    from .helpers import REPORT_WIDTHS
+    """
+    Формирует Excel-отчёт по одному цеху.
 
+    Аргументы:
+        department: номер цеха.
+        moment: момент для шапки (по умолчанию текущее время).
+        mode: режим из REPORT_MODES — "turnout" (явка) или "method" (способ).
+
+    Возвращает:
+        Книга openpyxl с отчётом по цеху.
+    """
     rule = REPORT_MODES[mode]
     moment = moment or timezone.localtime()
     people = Employee.objects.filter(department=department)
@@ -412,6 +532,7 @@ def department_report(
 
     sheet.cell(7, 1, rule["list_title"]).font = bold
 
+    # Список тех, у кого нужной отметки нет
     row = 8
     for person in people.exclude(rule["done"]).order_by(
         "surname", "name", "patronymic"
@@ -423,10 +544,24 @@ def department_report(
     return book
 
 
+# ==============================================================================
+# Архивы по цехам
+# ==============================================================================
+
+
 def reports_archive(
     moment: Optional[datetime] = None, mode: str = "turnout"
 ) -> ReportArchiver:
-    """Собирает ZIP-архив из отчётов по каждому цеху."""
+    """
+    Собирает ZIP-архив из отчётов по каждому цеху.
+
+    Аргументы:
+        moment: момент для шапок отчётов (по умолчанию текущее время).
+        mode: режим отчёта — "turnout" или "method".
+
+    Возвращает:
+        Наполненный ReportArchiver (без build).
+    """
     moment = moment or timezone.localtime()
     departments = (
         Employee.objects.exclude(department="")
@@ -438,12 +573,7 @@ def reports_archive(
     taken = set()
 
     for department in sorted(departments, key=_by_number):
-        name = department_file_name(department)
-        unique, attempt = name, 2
-        while unique in taken:
-            unique = f"{name}-{attempt}"
-            attempt += 1
-        taken.add(unique)
+        unique = _unique_name(taken, department_file_name(department))
         archiver.add_workbook(
             department_report(department, moment, mode), f"{unique}.xlsx"
         )
@@ -451,24 +581,24 @@ def reports_archive(
     return archiver
 
 
-def summary_table_no_u19(
-    group_field: str = "department", group_title: str = "Подразделение"
-) -> Any:
-    """Обёртка для обратной совместимости — сводная таблица без сотрудников 19 округа."""
-    return summary_table(
-        group_field=group_field, group_title=group_title, exclude_u19=True
-    )
-
-
 def department_custom_report(
     department: str, params: dict, moment: Optional[datetime] = None
 ) -> Any:
-    from .custom_reports import (
-        CUSTOM_COLUMNS,
-        _apply_border,
-        _custom_groups,
-        _draw_custom_groups,
-    )
+    """
+    Сводный отчёт по одному цеху (макет конструктора).
+
+    Аргументы:
+        department: номер цеха.
+        params: резерв — фильтры конструктора пока не применяются
+            к содержимому архива (см. аудит views/reports).
+        moment: момент для шапки (по умолчанию текущее время).
+
+    Возвращает:
+        Книга openpyxl с отчётом по цеху.
+    """
+    # Локальный импорт: custom_reports сам опирается на helpers и models,
+    # держим импорт здесь, чтобы не рисковать циклическими зависимостями
+    from .custom_reports import _draw_custom_groups
 
     moment = moment or timezone.localtime()
     people = Employee.objects.filter(department=department).order_by(
@@ -477,7 +607,7 @@ def department_custom_report(
 
     book = openpyxl.Workbook()
     sheet = book.active
-    sheet.title = f"Цех{department}"[:31]
+    sheet.title = f"Цех {department}"[:31]
     bold = Font(bold=True)
     centered = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
@@ -493,7 +623,6 @@ def department_custom_report(
 
     predicates = _draw_custom_groups(sheet, start_row=1, start_col=column)
 
-    # Настройка ширины колонок
     widths = (10, 8, 10, 42, 8) + (12,) * len(predicates)
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
@@ -504,7 +633,7 @@ def department_custom_report(
     totals = [0] * len(predicates)
     total_people = 0
 
-    # Итератор chunk_size предотвращает переполнение памяти на больших выборках
+    # iterator с chunk_size не держит всю выборку в памяти
     for person in people.iterator(chunk_size=2000):
         total_people += 1
         sheet.cell(row, 1, person.uik)
@@ -536,7 +665,16 @@ def department_custom_report(
 def custom_reports_archive(
     params: dict, moment: Optional[datetime] = None
 ) -> ReportArchiver:
+    """
+    Собирает ZIP-архив сводных отчётов по каждому цеху.
 
+    Аргументы:
+        params: фильтры конструктора (пока не влияют на содержимое).
+        moment: момент для шапок (по умолчанию текущее время).
+
+    Возвращает:
+        Наполненный ReportArchiver (без build).
+    """
     moment = moment or timezone.localtime()
     departments = (
         Employee.objects.exclude(department="")
@@ -548,12 +686,7 @@ def custom_reports_archive(
     taken = set()
 
     for department in sorted(departments, key=_by_number):
-        name = department_file_name(department)
-        unique, attempt = name, 2
-        while unique in taken:
-            unique = f"{name}-{attempt}"
-            attempt += 1
-        taken.add(unique)
+        unique = _unique_name(taken, department_file_name(department))
         archiver.add_workbook(
             department_custom_report(department, params, moment), f"{unique}.xlsx"
         )
