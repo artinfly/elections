@@ -121,6 +121,22 @@
             <a class="btn-orange" href="{% url 'export_method_archive' %}">Скачать</a>
         </div>
     </div>
+    {# ZIP-архив по цехам: та же таблица, что и custom (по людям) #}
+    <div class="card-block export-row">
+        <div class="export-text">
+            <div class="block-title">Способы голосования</div>
+            <div class="hint">
+                Такой же архив по цехам, но считается не явка, а сколько человек
+                выбрали способ голосования. В файле список тех, у кого способ ещё 
+                не выбран.
+            </div>
+        </div>
+        <div class="export-side">
+            <div class="export-num">{{ departments_count }}</div>
+            <div class="export-unit">цехов</div>
+            <a class="btn-orange" href="{% url 'export_custom_archive' %}">Скачать</a>
+        </div>
+    </div>
 
     {# Сводная таблица по цехам: способы (план) + явка + процент #}
     <div class="card-block export-row">

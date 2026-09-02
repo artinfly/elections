@@ -19,6 +19,7 @@ from .helpers import COLUMNS
 from .importers import import_base, import_voting_choices, mark_voted, set_turnout
 from .models import DEG, METHOD_LABELS, METHODS, UIK, UIK19, UVZ, Employee
 from .reports import (
+    custom_reports_archive,
     export_xlsx,
     production_method_table,
     production_table,
@@ -517,6 +518,22 @@ def _archive_response(request: HttpRequest, mode: str, prefix: str) -> HttpRespo
 @login_required
 def export_archive(request: HttpRequest) -> HttpResponse:
     return _archive_response(request, "turnout", "yavka")
+
+
+@login_required
+def export_custom_archive(request: HttpRequest) -> HttpResponse:
+    moment = timezone.localtime()
+    archiver = custom_reports_archive(request.GET, moment)
+
+    if not archiver.file_count:
+        request.session["msg"] = "Нет ни одного цеха - архив пустой"
+        return redirect("export")
+
+    response = HttpResponse(archiver.build_bytes(), content_type="application/zip")
+    response["Content-Disposition"] = (
+        f'attachment; filename="svodny_po_ceham_{moment:%Y%m%d_%H%M}.zip"'
+    )
+    return response
 
 
 @login_required

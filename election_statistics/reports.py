@@ -350,7 +350,8 @@ def summary_table(
 
 def export_xlsx() -> Any:
     """Полная выгрузка всех сотрудников в Excel."""
-    from .helpers import COLUMNS, METHOD_LABELS
+    from .helpers import COLUMNS
+    from .models import METHOD_LABELS
 
     book = openpyxl.Workbook()
     sheet = book.active
@@ -457,3 +458,104 @@ def summary_table_no_u19(
     return summary_table(
         group_field=group_field, group_title=group_title, exclude_u19=True
     )
+
+
+def department_custom_report(
+    department: str, params: dict, moment: Optional[datetime] = None
+) -> Any:
+    from .custom_reports import (
+        CUSTOM_COLUMNS,
+        _apply_border,
+        _custom_groups,
+        _draw_custom_groups,
+    )
+
+    moment = moment or timezone.localtime()
+    people = Employee.objects.filter(department=department).order_by(
+        "surname", "name", "patronymic", "uik"
+    )
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = f"Цех{department}"[:31]
+    bold = Font(bold=True)
+    centered = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    column = 1
+    for title in ("Номер УИК", "Цех", "Таб.№", "ФИО", "Округ"):
+        sheet.merge_cells(
+            start_row=1, start_column=column, end_row=2, end_column=column
+        )
+        cell = sheet.cell(1, column, title)
+        cell.font = bold
+        cell.alignment = centered
+        column += 1
+
+    predicates = _draw_custom_groups(sheet, start_row=1, start_col=column)
+
+    # Настройка ширины колонок
+    widths = (10, 8, 10, 42, 8) + (12,) * len(predicates)
+    for index, width in enumerate(widths, 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+
+    sheet.freeze_panes = "A3"
+
+    row = 3
+    totals = [0] * len(predicates)
+    total_people = 0
+
+    # Итератор chunk_size предотвращает переполнение памяти на больших выборках
+    for person in people.iterator(chunk_size=2000):
+        total_people += 1
+        sheet.cell(row, 1, person.uik)
+        sheet.cell(row, 2, person.department)
+        sheet.cell(row, 3, person.tab_number)
+        sheet.cell(row, 4, person.fio)
+        sheet.cell(row, 5, person.okrug)
+
+        for offset, predicate in enumerate(predicates):
+            if predicate(person):
+                sheet.cell(row, 6 + offset, "+")
+                totals[offset] += 1
+        row += 1
+
+    # Строка ИТОГО
+    sheet.cell(row, 1, "ИТОГО").font = bold
+    sheet.cell(row, 2, total_people).font = bold
+    sheet.cell(row, 2).alignment = centered
+
+    for offset, total in enumerate(totals):
+        cell = sheet.cell(row, 6 + offset, _format_with_percent(total, total_people))
+        cell.font = bold
+        cell.alignment = centered
+
+    _apply_border(sheet)
+    return book
+
+
+def custom_reports_archive(
+    params: dict, moment: Optional[datetime] = None
+) -> ReportArchiver:
+
+    moment = moment or timezone.localtime()
+    departments = (
+        Employee.objects.exclude(department="")
+        .values_list("department", flat=True)
+        .distinct()
+        .order_by()
+    )
+    archiver = ReportArchiver()
+    taken = set()
+
+    for department in sorted(departments, key=_by_number):
+        name = department_file_name(department)
+        unique, attempt = name, 2
+        while unique in taken:
+            unique = f"{name}-{attempt}"
+            attempt += 1
+        taken.add(unique)
+        archiver.add_workbook(
+            department_custom_report(department, params, moment), f"{unique}.xlsx"
+        )
+
+    return archiver

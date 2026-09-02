@@ -53,6 +53,11 @@ urlpatterns = [
     ),
     # Экспорт отчетов (Custom / Filtered)
     path("export/custom/", views.export_custom_report, name="export_custom"),
+    path(
+        "export/custom-archive/",
+        views.export_custom_archive,
+        name="export_custom_archive",
+    ),
     # =========================================================================
     # API (AJAX endpoints)
     # =========================================================================

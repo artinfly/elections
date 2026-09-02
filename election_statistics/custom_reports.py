@@ -36,7 +36,7 @@ CUSTOM_COLUMNS: List[Tuple[str, str, Callable]] = [
     # ИСПРАВЛЕНО: было p.method in UIK19 (ошибка логики), стало строгое равенство
     ("Не 19 округ", "Открепился", lambda p: p.method == UIK19 and p.detached),
     ("Не 19 округ", "Проголосовал", lambda p: p.voted and p.voted_method == UIK19),
-    ("", "Не определился", lambda p: p.not_going),
+    ("", "Не определился", lambda p: p.method not in (DEG, UIK, UVZ, UIK19)),
 ]
 
 
@@ -184,9 +184,6 @@ def custom_report(params: dict, moment: Optional[datetime] = None) -> Any:
                 totals[offset] += 1
         row += 1
 
-    # Последняя колонка ("Не определился") считается как остаток от общего числа
-    totals[-1] = total_people - sum(totals[:-1])
-
     # Строка ИТОГО
     sheet.cell(row, 1, "ИТОГО").font = bold
     sheet.cell(row, 2, total_people).font = bold
@@ -310,7 +307,6 @@ def custom_production_summary(
                     grand_totals[offset] += val
                 row += 1
 
-            prod_totals[-1] = prod_total_people - sum(prod_totals[:-1])
             sheet.cell(row, 2, "Итого").font = bold
             sheet.cell(row, 3, prod_total_people).font = bold
             sheet.cell(row, 3).alignment = Alignment(horizontal="center")
@@ -337,8 +333,6 @@ def custom_production_summary(
                     )
                 grand_totals[offset] += val
             row += 1
-
-    grand_totals[-1] = grand_total_people - sum(grand_totals[:-1])
 
     if include_depts:
         sheet.cell(row, 2, "Всего по Обществу").font = bold
