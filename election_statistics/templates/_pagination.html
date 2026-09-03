@@ -1,10 +1,14 @@
+{# Пагинация рисуется только если страниц больше одной #}
 {% if page.paginator.num_pages > 1 %}
 <div class="d-flex align-items-center gap-1 mt-3 flex-wrap">
+    {# Кнопка "назад" — на предыдущую страницу #}
     {% if page.has_previous %}
         <a class="pgn-btn" href="?{{ query }}&page={{ page.previous_page_number }}">←</a>
     {% endif %}
 
-    {% for num in page_range %}x
+    {% comment %} {# Окно номеров страниц вокруг текущей (page_range считается в views._page_window).
+      Текущая страница — некликабельный span, остальные — ссылки. #} {% endcomment %}
+    {% for num in page_range %}
         {% if num == page.number %}
             <span class="pgn-btn pgn-active">{{ num }}</span>
         {% else %}
@@ -12,10 +16,12 @@
         {% endif %}
     {% endfor %}
 
+    {# Кнопка "вперёд" — на следующую страницу #}
     {% if page.has_next %}
         <a class="pgn-btn" href="?{{ query }}&page={{ page.next_page_number }}">→</a>
     {% endif %}
 
+    {# Подпись с общим числом страниц #}
     <span class="row-count-label ms-2">из {{ page.paginator.num_pages }}</span>
 </div>
 {% endif %}
