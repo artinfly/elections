@@ -72,4 +72,7 @@ urlpatterns = [
     path("api/voted/", views.api_voted, name="api_voted"),
     path("api/bulk-voted/", views.api_bulk_voted, name="api_bulk_voted"),
     path("api/uik-stats/", views.api_uik_stats, name="api_uik_stats"),
+    path(
+        "toggle-absence/<int:employee_id>/", views.toggle_absence, name="toggle_absence"
+    ),
 ]

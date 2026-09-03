@@ -77,6 +77,7 @@ class Employee(models.Model):
     not_going = models.BooleanField("Не пойдет", default=False)
     mark_uvz = models.BooleanField("Регистрация на УИК-УВЗ", default=False)
     mark_deg = models.BooleanField("Регистрация на ДЭГ", default=False)
+    absence = models.BooleanField("Отсутствие по УП", default=False)
 
     class Meta:
         verbose_name = "Сотрудник"

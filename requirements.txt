@@ -21,4 +21,4 @@ mypy-extensions==1.1.0     # зависимость black
 packaging==26.2            # зависимость black
 pathspec==1.1.1            # зависимость black
 platformdirs==4.10.1       # зависимость black
-pytokens==0.4.1            # зависимость black (токенайзер) # python -m pip install --no-index --find-links wheels -r requirements.t
+pytokens==0.4.1            # зависимость black (токенайзер) # python -m pip install --no-index --find-links wheels -r requirements.txt

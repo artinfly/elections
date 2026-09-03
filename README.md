@@ -84,7 +84,6 @@ election_statistics/
 ├── reports.py            стандартные отчёты и архивы по цехам (REPORT_MODES)
 ├── custom_reports.py     сводный отчёт по фильтрам (CUSTOM_COLUMNS)
 ├── helpers.py            общие утилиты чтения и оформления xlsx
-├── tests.py              52 теста
 │
 ├── management/commands/
 │   ├── import_workshops.py   справочник цех - производство из внешней базы

@@ -40,6 +40,8 @@ def _rows_by_tab(rows: Iterator, positions: dict) -> dict:
             cell = row[index] if index < len(row) else None
             values[field] = _date(cell) if field == "birth_date" else _text(cell)
         tab = values.pop("tab_number")
+        if tab.isdigit():
+            tab = tab.zfill(7)
         if tab:
             parsed[tab] = values
     return parsed
@@ -250,6 +252,9 @@ def import_voting_choices(upload: Any) -> tuple[int, int, int]:
             tab_number = _text(row[tab_col] if tab_col < len(row) else None)
             if not tab_number:
                 continue
+            # Excel хранит табель числоми и теряет ведущие нули - дополняем до 7 цифр
+            if tab_number.isdigit:
+                tab_number = tab_number.zfill(7)
 
             # Способ определяется отметкой "1"; две единицы в строке — ошибка
             selected_method = ""
@@ -283,3 +288,39 @@ def import_voting_choices(upload: Any) -> tuple[int, int, int]:
             continue
 
     return updated, total, errors
+
+
+def import_turnout(upload: Any) -> tuple[int, int, int]:
+    """
+    Импорт отметок явки из файла штаба: табельный в шапке и список под ним.
+    Для каждого табельного проставляется явка по стандартной логике set_turnout
+    (vothed=True, voted_at=сейчас, voted_method=method; без способа - пропуск).
+
+    Возвращает: (отмечено, всего строк, ошибок).
+    """
+    with _sheet(upload) as rows:
+        all_rows = list(rows)
+
+    if not all_rows:
+        raise ValueError("Ошибка: файл пустой")
+
+    # Шапка: первая непустая ячейка первой строки должна означать "Табельный"
+    header = str(all_rows[0][0] or "").strip().lower()
+    if "табель" not in header and "таб" not in header:
+        raise ValueError("Ошибка: в А1 ожидается заголовок 'Табельный'")
+
+    tabs = []
+    for row in all_rows:
+        if not row:
+            continue
+        tab = _text(row[0])
+        if tab and tab.isdigit():
+            tabs.append(tab.zfill(7))
+
+    if not tabs:
+        return 0, 0, 0
+
+    found = Employee.objects.filter(tab_number__in=tabs)
+    missing = len(tabs) - found.count()
+
+    # Пропускаем сотрудников без выбранного способа

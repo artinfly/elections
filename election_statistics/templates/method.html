@@ -61,13 +61,34 @@
 {# Таблица сотрудников с переключателем способа голосования в каждой строке #}
 <div class="table-container">
 <table class="report-table">
-    <thead><tr><th>Цех</th><th>Таб№</th><th>ФИО</th><th class="col-mark">Регистрация на УИК-УВЗ</th><th class="col-mark">Регистрация на ДЭГ</th><th>Округ</th><th>УИК</th><th class="col-method">Способ</th></tr></thead>
+    <thead><tr><th>Цех</th><th>Таб№</th><th>ФИО</th><th class="col-absence">Отсутствие</th><th class="col-mark">Регистрация на УИК-УВЗ</th><th class="col-mark">Регистрация на ДЭГ</th><th>Округ</th><th>УИК</th><th class="col-method">Способ</th></tr></thead>
     <tbody>
     {% for r in rows %}
         <tr>
             <td>{{ r.department }}</td>
             <td>{{ r.tab_number }}</td>
             <td class="wrap">{{ r.fio }}</td>
+            <td class="col-absence">
+                <button type="button" class="btn-mark absence-btn {% if r.absence %}on{% endif %}"
+                        data-id="{{ r.id }}"
+                        data-on-label="УП" data-off-label="Отметить УП">
+                    {% if r.absence %}УП{% else %}Отметить УП{% endif %}
+                </button>
+            </td>
+            <td class="col-mark">
+                {% if r.method == "uvz" %}
+                <button type="button" class="btn-mark {% if r.mark_uvz %}on{% endif %}"
+                        data-id="{{ r.id }}" data-field="mark_uvz"
+                        data-on-label="Заявление оформлено" data-off-label="Оформить заявление">
+                    {% if r.mark_uvz %}Заявление оформлено{% else %}Оформить заявление{% endif %}
+                </button>
+                {% else %}
+                <button type="button" class="btn-mark btn-mark-off"
+                        data-alert="У сотрудника способ голосования - не УИК-УВЗ, отметка недоступна.">
+                    Оформить заявление
+                </button>
+                {% endif %}
+            </td>
             <td class="col-mark">
                 {% if r.method == "uvz" %}
                 <button type="button" class="btn-mark {% if r.mark_uvz %}on{% endif %}"
