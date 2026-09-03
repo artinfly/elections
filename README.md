@@ -18,11 +18,11 @@ python -m venv .venv
 .venv/Scripts/python.exe manage.py createsuperuser
 .venv/Scripts/python.exe manage.py setup_groups
 .venv/Scripts/python.exe manage.py runserver
-```
 
 `requirements.txt` один на всё: и запуск приложения, и инструменты
 форматирования (black, isort). Каждая строка файла соответствует одному
 wheel-файлу в `wheels/` и наоборот.
+```
 
 ### Установка без интернета
 
@@ -32,18 +32,11 @@ wheel-файлу в `wheels/` и наоборот.
 .venv/Scripts/python.exe -m pip install --no-index --find-links wheels -r requirements.txt
 ```
 
-Python — строго 3.13.x: wheel'ы `black`, `psycopg2-binary` и `pytokens` собраны
+Python — строго 3.13.x: wheel'ы `psycopg2-binary` и `pytokens` собраны
 под cp313-win_amd64. Остальные пакеты (`py3-none-any`) встанут на любую версию.
 
 Готовую папку `.venv` переносить с другой машины нельзя — в ней записан
 абсолютный путь к Python. Её создают заново на месте.
-
-### Форматирование кода
-
-```bash
-.venv/Scripts/python.exe -m black .
-.venv/Scripts/python.exe -m isort .
-```
 
 ## Настройки
 
@@ -95,8 +88,6 @@ election_statistics/
 utils/
 └── archiver.py           ReportArchiver: сборка книг openpyxl и байтов в zip
 
-wheels/                   офлайн-пакеты: один wheel на строку requirements.txt
-                          (в репозиторий не попадает, переносится отдельно)
 ```
 
 ## Страницы
@@ -178,6 +169,12 @@ wheels/                   офлайн-пакеты: один wheel на стр�
 УИК-УВЗ. Проставляются через API только при соответствующем выбранном способе:
 отметить `mark_deg` можно лишь сотруднику с методом `deg`, иначе API вернёт
 ошибку «способ не соответствует полю».
+
+## Отметка «Отсутствие по УП»
+
+Булево поле 'absence'. Отметка об отсутствии по уважительной причине.
+Проставляется через кнопку на странице «Способ голосования» (асинхронный запрос).
+Повторная загрузка файла работников эту отметку не стирает.
 
 ## Отметки «Открепился» и «Не пойдет»
 

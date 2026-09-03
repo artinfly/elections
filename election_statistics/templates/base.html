@@ -1,79 +1,135 @@
-{% load static %}<!DOCTYPE html>
+{% load static %}
+<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Выборы{% endblock %}</title>
-    {# Стили: Bootstrap + общие стили приложения + дополнения app.css #}
+    
+    {# Встроенный SVG-favicon (галочка). Предотвращает ошибку 404 в консоли браузера. #}
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✓</text></svg>">
+    
+    <title>{% block title %}Учёт голосования{% endblock %}</title>
+    
+    {# ========================================================================== #}
+    {# Подключение стилей: Bootstrap (база) + кастомные стили приложения          #}
+    {# ========================================================================== #}
     <link rel="stylesheet" href="{% static 'vendor/bootstrap.min.css' %}">
     <link rel="stylesheet" href="{% static 'css/style.css' %}">
     <link rel="stylesheet" href="{% static 'css/app.css' %}">
 </head>
 <body>
-{# Боковая панель навигации: общая для всех страниц приложения #}
-<div class="sidebar">
+
+{# ========================================================================== #}
+{# Боковая панель навигации (Sidebar)                                         #}
+{# Общая для всех страниц приложения. Активный пункт подсвечивается через     #}
+{# request.resolver_match.url_name (требует context_processors.request).      #}
+{# ========================================================================== #}
+<nav class="sidebar" aria-label="Основная навигация">
     {# Логотип и название системы #}
     <div class="sidebar-logo">
         <div class="sidebar-logo-icon">
-            <svg viewBox="0 0 24 24" fill="#fff"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>
+            <svg viewBox="0 0 24 24" fill="#fff" aria-hidden="true">
+                <path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/>
+            </svg>
         </div>
-        <div class="sidebar-logo-text">Выборы<span>учёт голосования</span></div>
+        <div class="sidebar-logo-text">
+            Выборы
+            <span>учёт голосования</span>
+        </div>
     </div>
 
     {# Раздел "Учёт": страницы простановки способа и отметки явки #}
     <div class="nav-section">Учёт</div>
-    <a class="nav-link {% if request.resolver_match.url_name == 'method' %}active{% endif %}" href="{% url 'method' %}">Способ голосования</a>
-    <a class="nav-link {% if request.resolver_match.url_name == 'elections' %}active{% endif %}" href="{% url 'elections' %}">Голосование</a>
+    <a class="nav-link {% if request.resolver_match.url_name == 'method' %}active{% endif %}" 
+       href="{% url 'method' %}">
+        Способ голосования
+    </a>
+    <a class="nav-link {% if request.resolver_match.url_name == 'elections' %}active{% endif %}" 
+       href="{% url 'elections' %}">
+        Голосование
+    </a>
 
     {# Раздел "Данные": загрузка видна только операторам, отчёты — всем авторизованным #}
     <div class="nav-section">Данные</div>
     {% if is_operator %}
-    <a class="nav-link {% if request.resolver_match.url_name == 'upload' %}active{% endif %}" href="{% url 'upload' %}">Загрузка</a>
+    <a class="nav-link {% if request.resolver_match.url_name == 'upload' %}active{% endif %}" 
+       href="{% url 'upload' %}">
+        Загрузка
+    </a>
     {% endif %}
-    <a class="nav-link {% if request.resolver_match.url_name == 'export' %}active{% endif %}" href="{% url 'export' %}">Отчёты</a>
+    <a class="nav-link {% if request.resolver_match.url_name == 'export' %}active{% endif %}" 
+       href="{% url 'export' %}">
+        Отчёты
+    </a>
 
-    {# Ссылка в админку — только для суперпользователя #}
+    {# Ссылка в админку Django — доступна только суперпользователям #}
     {% if user.is_superuser %}
     <a class="nav-link" href="/admin/">Админка</a>
     {% endif %}
 
-    {# Кнопка выхода внизу панели #}
+    {# Кнопка выхода из системы (размещена внизу панели) #}
     <div class="sidebar-logout">
-        <a href="{% url 'logout' %}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <a href="{% url 'logout' %}" aria-label="Выйти из системы">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
             </svg>
             Выйти
         </a>
     </div>
-</div>
+</nav>
 
-<div class="main-content">
-{% comment %} {# Скрытая форма с CSRF-токеном: app.js читает токен отсюда
-  и подставляет его в заголовок X-CSRFToken при fetch-запросах к API #} {% endcomment %}
-<form id="csrf-holder" hidden>{% csrf_token %}</form>
-{# Общий блок для ошибок JS (например, если API вернул ошибку при сохранении) #}
-<div class="err-msg" id="app-error" style="display:none"></div>
-{# Сюда страницы подставляют своё содержимое #}
-{% block content %}{% endblock %}
-</div>
-{% comment %} {# Модальное окно "Люди по участкам": открывается кликом по карточке УИК
-  на страницах method/elections, наполняется через /api/uik-stats/ (app.js) #} {% endcomment %}
-<div class="modal-back" id="uik-modal" hidden>
+{# ========================================================================== #}
+{# Основная область контента                                                  #}
+{# ========================================================================== #}
+<main class="main-content">
+    
+    {% comment %} {# Скрытая форма с CSRF-токеном. 
+       Файл app.js читает токен отсюда и подставляет его в заголовок X-CSRFToken 
+       при fetch-запросах к API. Это стандартный паттерн для Django + AJAX. #} {% endcomment %}
+    <form id="csrf-holder" hidden aria-hidden="true">
+        {% csrf_token %}
+    </form>
+    
+    {% comment %} {# Общий контейнер для отображения ошибок JavaScript 
+       (например, если API вернул ошибку 500 при сохранении). #} {% endcomment %}
+    <div class="err-msg" id="app-error" style="display:none" role="alert"></div>
+    
+    {# Блок, в который дочерние шаблоны подставляют своё уникальное содержимое #}
+    {% block content %}{% endblock %}
+    
+</main>
+
+{# ========================================================================== #}
+{# Модальное окно "Люди по участкам"                                          #}
+{# Открывается кликом по карточке УИК на страницах method/elections.          #}
+{# Наполняется данными асинхронно через эндпоинт /api/uik-stats/ (app.js).    #}
+{# ========================================================================== #}
+<div class="modal-back" id="uik-modal" hidden aria-modal="true" role="dialog" aria-labelledby="uik-modal-title">
     <div class="modal-box">
         <div class="modal-head">
             <div>
-                <div class="modal-title">Люди по участкам</div>
+                <div class="modal-title" id="uik-modal-title">Люди по участкам</div>
                 <div class="modal-sub" id="uik-modal-sub"></div>
             </div>
-            <button type="button" class="modal-close" id="uik-modal-close">&times;</button>
+            <button type="button" class="modal-close" id="uik-modal-close" aria-label="Закрыть модальное окно">
+                &times;
+            </button>
         </div>
-        <div class="modal-body" id="uik-modal-body"></div>
+        <div class="modal-body" id="uik-modal-body">
+            {# Сюда JS вставляет таблицу со статистикой #}
+        </div>
     </div>
 </div>
-{% comment %} {# Общий JS приложения: CSRF для fetch, модалка УИК.
-  Страницы добавляют свои скрипты через block scripts #} {% endcomment %}
+
+{# ========================================================================== #}
+{# Скрипты                                                                    #}
+{# app.js содержит общую логику: чтение CSRF-токена, функцию postJSON,        #}
+{# обработку модалки УИК и глобальные обработчики ошибок.                     #}
+{# ========================================================================== #}
 <script src="{% static 'js/app.js' %}"></script>
+
+{# Блок для подключения специфичных скриптов отдельных страниц #}
 {% block scripts %}{% endblock %}
+
 </body>
 </html>

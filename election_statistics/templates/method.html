@@ -1,193 +1,280 @@
 {% extends "base.html" %}
+
 {% block title %}Способ голосования{% endblock %}
+
 {% block content %}
-{# Шапка страницы: заголовок и число найденных по текущим фильтрам #}
+{# ========================================================================== #}
+{# Шапка страницы: заголовок и индикатор количества найденных сотрудников     #}
+{# ========================================================================== #}
 <div class="page-header">
     <h5>Способ голосования</h5>
     <span class="row-count-label">Найдено: {{ found }}</span>
 </div>
 
-{% comment %} {# Карточки-счётчики по запланированным способам голосования.
-  Значения берутся из counts.method (план), обновляются JS после каждого клика. #} {% endcomment %}
+{# ========================================================================== #}
+{# Карточки-счётчики (дашборд)                                                #}
+{# Значения берутся из counts.method (план). Обновляются через JS без         #}
+{# перезагрузки страницы после каждого изменения способа.                     #}
+{# Порядок карточек в DOM строго соответствует индексам в JS (0..5).          #}
+{# ========================================================================== #}
 <div class="dash-row mb-4">
-    {# ДЭГ #}
+    {# 0: ДЭГ #}
     <div>
         <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(37,99,235,.12);color:#2563eb">Д</div>
-            <div><div class="dash-card-num">{{ counts.method.deg }}</div><div class="dash-card-lbl">ДЭГ</div></div>
+            <div>
+                <div class="dash-card-num">{{ counts.method.deg }}</div>
+                <div class="dash-card-lbl">ДЭГ</div>
+            </div>
         </div>
     </div>
-    {# УИК: карточка-кнопка, по клику открывает модалку с разбивкой по участкам (app.js) #}
+    
+    {# 1: УИК (интерактивная карточка, открывает модалку с разбивкой по участкам) #}
     <div>
         <button type="button" class="dash-card dash-card-action" id="uik-card"
                 title="Показать распределение по участкам">
             <div class="dash-card-icon" style="background:rgba(42,120,214,.12);color:#2a78d6">У</div>
-            <div><div class="dash-card-num">{{ counts.method.uik }}</div><div class="dash-card-lbl">УИК<span class="dash-card-more">по участкам</span></div></div>
+            <div>
+                <div class="dash-card-num">{{ counts.method.uik }}</div>
+                <div class="dash-card-lbl">УИК<span class="dash-card-more">по участкам</span></div>
+            </div>
         </button>
     </div>
-    {# УИК-УВЗ #}
+    
+    {# 2: УИК-УВЗ #}
     <div>
         <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(235,104,52,.12);color:#eb6834">В</div>
-            <div><div class="dash-card-num">{{ counts.method.uvz }}</div><div class="dash-card-lbl">УИК-УВЗ</div></div>
+            <div>
+                <div class="dash-card-num">{{ counts.method.uvz }}</div>
+                <div class="dash-card-lbl">УИК-УВЗ</div>
+            </div>
         </div>
     </div>
-    {# УИК-19: план, как и остальные карточки страницы (counts.method, не voted!) #}
+    
+    {# 3: УИК-19 #}
     <div>
         <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(124,58,237,.12);color:#7c3aed">19</div>
-            <div><div class="dash-card-num">{{ counts.method.u19 }}</div><div class="dash-card-lbl">УИК-19</div></div>
+            <div>
+                <div class="dash-card-num">{{ counts.method.u19 }}</div>
+                <div class="dash-card-lbl">УИК-19</div>
+            </div>
         </div>
     </div>
-    {# Способ ещё не назначен #}
+    
+    {# 4: Способ не назначен #}
     <div>
         <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(136,136,136,.12);color:#888">—</div>
-            <div><div class="dash-card-num">{{ counts.method.none }}</div><div class="dash-card-lbl">Не назначен</div></div>
+            <div>
+                <div class="dash-card-num">{{ counts.method.none }}</div>
+                <div class="dash-card-lbl">Не назначен</div>
+            </div>
         </div>
     </div>
-    {# Всего сотрудников в текущей выборке #}
+    
+    {# 5: Всего сотрудников в текущей выборке #}
     <div>
         <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(224,123,42,.12);color:#e07b2a">Σ</div>
-            <div><div class="dash-card-num">{{ counts.method.total }}</div><div class="dash-card-lbl">Всего</div></div>
+            <div>
+                <div class="dash-card-num">{{ counts.method.total }}</div>
+                <div class="dash-card-lbl">Всего</div>
+            </div>
         </div>
     </div>
 </div>
 
-{# Панель фильтров (общая для страниц списков) #}
+{# ========================================================================== #}
+{# Панель фильтров (подключается из общего шаблона)                           #}
+{# ========================================================================== #}
 {% include "_filters.html" %}
 
-{# Таблица сотрудников с переключателем способа голосования в каждой строке #}
+{# ========================================================================== #}
+{# Таблица сотрудников                                                        #}
+{# В заголовке 9 колонок. В теле строки должно быть ровно 9 ячеек <td>.       #}
+{# ========================================================================== #}
 <div class="table-container">
-<table class="report-table">
-    <thead><tr><th>Цех</th><th>Таб№</th><th>ФИО</th><th class="col-absence">Отсутствие</th><th class="col-mark">Регистрация на УИК-УВЗ</th><th class="col-mark">Регистрация на ДЭГ</th><th>Округ</th><th>УИК</th><th class="col-method">Способ</th></tr></thead>
-    <tbody>
-    {% for r in rows %}
-        <tr>
-            <td>{{ r.department }}</td>
-            <td>{{ r.tab_number }}</td>
-            <td class="wrap">{{ r.fio }}</td>
-            <td class="col-absence">
-                <button type="button" class="btn-mark absence-btn {% if r.absence %}on{% endif %}"
-                        data-id="{{ r.id }}"
-                        data-on-label="УП" data-off-label="Отметить УП">
-                    {% if r.absence %}УП{% else %}Отметить УП{% endif %}
-                </button>
-            </td>
-            <td class="col-mark">
-                {% if r.method == "uvz" %}
-                <button type="button" class="btn-mark {% if r.mark_uvz %}on{% endif %}"
-                        data-id="{{ r.id }}" data-field="mark_uvz"
-                        data-on-label="Заявление оформлено" data-off-label="Оформить заявление">
-                    {% if r.mark_uvz %}Заявление оформлено{% else %}Оформить заявление{% endif %}
-                </button>
-                {% else %}
-                <button type="button" class="btn-mark btn-mark-off"
-                        data-alert="У сотрудника способ голосования - не УИК-УВЗ, отметка недоступна.">
-                    Оформить заявление
-                </button>
-                {% endif %}
-            </td>
-            <td class="col-mark">
-                {% if r.method == "uvz" %}
-                <button type="button" class="btn-mark {% if r.mark_uvz %}on{% endif %}"
-                        data-id="{{ r.id }}" data-field="mark_uvz"
-                        data-on-label="Заявление оформлено" data-off-label="Оформить заявление">
-                    {% if r.mark_uvz %}Заявление оформлено{% else %}Оформить заявление{% endif %}
-                </button>
-                {% else %}
-                <button type="button" class="btn-mark btn-mark-off"
-                        data-alert="У сотрудника способ голосования - не УИК-УВЗ, отметка недоступна.">
-                    Оформить заявление
-                </button>
-                {% endif %}
-            </td>
-            <td class="col-mark">
-                {% if r.method == "deg" %}
-                <button type="button" class="btn-mark {% if r.mark_deg %}on{% endif %}"
-                        data-id="{{ r.id }}" data-field="mark_deg"
-                        data-on-label="Зарегистрирован" data-off-label="Зарегистрировать">
-                    {% if r.mark_deg %}Зарегистрирован{% else %}Зарегистрировать{% endif %}
-                </button>
-                {% else %}
-                <button type="button" class="btn-mark btn-mark-off"
-                        data-alert="У сотрудника способ голосования - не ДЭГ, отметка недоступна.">
-                    Зарегистрировать
-                </button>
-                {% endif %}
-            </td>
-            <td>{{ r.okrug }}</td>
-            <td>{{ r.uik }}</td>
-            <td class="col-method">
-                {% comment %} {# Сегмент-переключатель: data-id — ID сотрудника,
-                   кнопки data-m — коды способов. Активная кнопка с классом "on". #} {% endcomment %}
-                <span class="seg seg-method" data-id="{{ r.id }}">
-                    {% for code, label in methods %}
-                    <button type="button" data-m="{{ code }}" class="{% if r.method == code %}on{% endif %}">{{ label }}</button>
-                    {% endfor %}
-                </span>
-            </td>
-        </tr>
-    {% empty %}
-        <tr><td colspan="6">Нет данных</td></tr>
-    {% endfor %}
-    </tbody>
-</table>
+    <table class="report-table">
+        <thead>
+            <tr>
+                <th>Цех</th>
+                <th>Таб№</th>
+                <th>ФИО</th>
+                <th class="col-absence">Отсутствие</th>
+                <th class="col-mark">Регистрация на УИК-УВЗ</th>
+                <th class="col-mark">Регистрация на ДЭГ</th>
+                <th>Округ</th>
+                <th>УИК</th>
+                <th class="col-method">Способ</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for r in rows %}
+            <tr>
+                {# 1. Цех #}
+                <td>{{ r.department }}</td>
+                {# 2. Табельный номер #}
+                <td>{{ r.tab_number }}</td>
+                {# 3. ФИО #}
+                <td class="wrap">{{ r.fio }}</td>
+                
+                {# 4. Отсутствие по УП (асинхронная кнопка) #}
+                <td class="col-absence">
+                    <button type="button" class="btn-mark absence-btn {% if r.absence %}on{% endif %}"
+                            data-id="{{ r.id }}"
+                            data-on-label="УП" data-off-label="Отметить УП">
+                        {% if r.absence %}УП{% else %}Отметить УП{% endif %}
+                    </button>
+                </td>
+                
+                {# 5. Регистрация на УИК-УВЗ (активна только если выбран способ УВЗ) #}
+                <td class="col-mark">
+                    {% if r.method == "uvz" %}
+                    <button type="button" class="btn-mark {% if r.mark_uvz %}on{% endif %}"
+                            data-id="{{ r.id }}" data-field="mark_uvz"
+                            data-on-label="Заявление оформлено" data-off-label="Оформить заявление">
+                        {% if r.mark_uvz %}Заявление оформлено{% else %}Оформить заявление{% endif %}
+                    </button>
+                    {% else %}
+                    <button type="button" class="btn-mark btn-mark-off"
+                            data-alert="У сотрудника способ голосования - не УИК-УВЗ, отметка недоступна.">
+                        Оформить заявление
+                    </button>
+                    {% endif %}
+                </td>
+                
+                {# 6. Регистрация на ДЭГ (активна только если выбран способ ДЭГ) #}
+                <td class="col-mark">
+                    {% if r.method == "deg" %}
+                    <button type="button" class="btn-mark {% if r.mark_deg %}on{% endif %}"
+                            data-id="{{ r.id }}" data-field="mark_deg"
+                            data-on-label="Зарегистрирован" data-off-label="Зарегистрировать">
+                        {% if r.mark_deg %}Зарегистрирован{% else %}Зарегистрировать{% endif %}
+                    </button>
+                    {% else %}
+                    <button type="button" class="btn-mark btn-mark-off"
+                            data-alert="У сотрудника способ голосования - не ДЭГ, отметка недоступна.">
+                        Зарегистрировать
+                    </button>
+                    {% endif %}
+                </td>
+                
+                {# 7. Округ #}
+                <td>{{ r.okrug }}</td>
+                {# 8. Номер УИК #}
+                <td>{{ r.uik }}</td>
+                
+                {# 9. Сегмент-переключатель способа голосования #}
+                <td class="col-method">
+                    <span class="seg seg-method" data-id="{{ r.id }}">
+                        {% for code, label in methods %}
+                        <button type="button" data-m="{{ code }}" class="{% if r.method == code %}on{% endif %}">{{ label }}</button>
+                        {% endfor %}
+                    </span>
+                </td>
+            </tr>
+        {% empty %}
+            {# Заглушка для пустой выборки. colspan=9, так как в таблице 9 колонок #}
+            <tr><td colspan="9" class="text-center">Нет данных</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
 </div>
-{# Пагинация списка #}
+
+{# ========================================================================== #}
+{# Пагинация (подключается из общего шаблона)                                 #}
+{# ========================================================================== #}
 {% include "_pagination.html" %}
 {% endblock %}
 
 {% block scripts %}
 <script>
-// Обработка кликов по переключателям способа голосования.
-// Клик по активной кнопке сбрасывает способ (method=''),
-// клик по неактивной — назначает выбранный способ.
-    const canEdit = {% if can_edit %}true{% else %}false{% endif %}
-document.querySelectorAll('.seg').forEach(function (seg) {
-    seg.addEventListener('click', function (e) {
-        if (!canEdit) return; 
-        var btn = e.target.closest('button');
-        if (!btn) return;
-        var on = btn.classList.contains('on');
-        // Сохраняем на сервере; сервер вернёт свежие счётчики по тем же фильтрам
-        postJSON('/api/method/', {
-            id: seg.dataset.id,
-            method: on ? '' : btn.dataset.m
-        }).then(function (c) {
-            // Перерисовываем активную кнопку в строке
-            seg.querySelectorAll('button').forEach(function (b) { b.classList.remove('on'); });
-            if (!on) btn.classList.add('on');
-            // Обновляем карточки-счётчики сверху (порядок .dash-card-num в DOM):
-            // 0=ДЭГ, 1=УИК, 2=УВЗ, 3=УИК-19, 4=Не назначен
-            var n = document.querySelectorAll('.dash-card-num');
-            n[0].textContent = c.method.deg;
-            n[1].textContent = c.method.uik;
-            n[2].textContent = c.method.uvz;
-            n[3].textContent = c.method.u19;
-            n[4].textContent = c.method.none;
+    // Флаг прав доступа: если пользователь в группе viewer, редактирование блокируется.
+    const canEdit = {% if can_edit %}true{% else %}false{% endif %};
+
+    // ========================================================================
+    // Обработчик переключателей способа голосования (сегменты в последней колонке)
+    // ========================================================================
+    document.querySelectorAll('.seg-method').forEach(function (seg) {
+        seg.addEventListener('click', function (e) {
+            if (!canEdit) return; 
+            
+            var btn = e.target.closest('button');
+            if (!btn) return;
+            
+            // Если кнопка уже активна (on), клик по ней сбрасывает способ (method='').
+            // Иначе назначает выбранный способ.
+            var isOn = btn.classList.contains('on');
+            
+            postJSON('/api/method/', {
+                id: seg.dataset.id,
+                method: isOn ? '' : btn.dataset.m
+            }).then(function (c) {
+                // Снимаем выделение со всех кнопок в текущем сегменте.
+                seg.querySelectorAll('button').forEach(function (b) { b.classList.remove('on'); });
+                // Если способ был назначен, выделяем активную кнопку.
+                if (!isOn) btn.classList.add('on');
+                
+                // Обновляем карточки-счётчики сверху (индексы строго соответствуют DOM).
+                var n = document.querySelectorAll('.dash-card-num');
+                n[0].textContent = c.method.deg;
+                n[1].textContent = c.method.uik;
+                n[2].textContent = c.method.uvz;
+                n[3].textContent = c.method.u19;
+                n[4].textContent = c.method.none;
+                n[5].textContent = c.method.total; // Обновление общего счетчика
+            });
         });
     });
-});
-document.querySelectorAll('.btn-mark').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-        if (!canEdit) return;
-        if (!btn.dataset.field) {
-            alert(btn.dataset.alert);
-            return;
-        }
-        var on = btn.classList.contains('on');
-        // Сохраняем на сервере; сервер вернёт свежие счётчики по тем же фильтрам
-        postJSON('/api/mark/', {
-            id: btn.dataset.id,
-            field: btn.dataset.field,
-            value: !on
-        }).then(function () {
-            btn.classList.toggle('on', !on);
-            btn.textContent = !on ? btn.dataset.onLabel : btn.dataset.offLabel;
+
+    // ========================================================================
+    // Обработчик кнопок регистрации (УИК-УВЗ и ДЭГ)
+    // Исключаем .absence-btn, так как у неё отдельный эндпоинт и логика.
+    // ========================================================================
+    document.querySelectorAll('.btn-mark:not(.absence-btn)').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            if (!canEdit) return;
+            
+            // Если у кнопки нет data-field, значит способ сотрудника не позволяет
+            // поставить эту отметку. Показываем предупреждение.
+            if (!btn.dataset.field) {
+                alert(btn.dataset.alert);
+                return;
+            }
+            
+            var isOn = btn.classList.contains('on');
+            
+            postJSON('/api/mark/', {
+                id: btn.dataset.id,
+                field: btn.dataset.field,
+                value: !isOn
+            }).then(function () {
+                // Инвертируем визуальное состояние и текст кнопки.
+                btn.classList.toggle('on', !isOn);
+                btn.textContent = !isOn ? btn.dataset.onLabel : btn.dataset.offLabel;
+            });
         });
     });
-});
+
+    // ========================================================================
+    // Обработчик кнопки «Отсутствие по УП»
+    // Отправляет запрос на отдельный эндпоинт, который инвертирует булево поле.
+    // ========================================================================
+    document.querySelectorAll('.absence-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            if (!canEdit) return;
+            
+            // URL формируется динамически на основе data-id сотрудника.
+            var url = '/api/toggle-absence/' + btn.dataset.id + '/';
+            
+            postJSON(url, {}).then(function (data) {
+                // Сервер возвращает актуальное значение absence.
+                btn.classList.toggle('on', data.absence);
+                btn.textContent = data.absence ? btn.dataset.onLabel : btn.dataset.offLabel;
+            });
+        });
+    });
 </script>
 {% endblock %}

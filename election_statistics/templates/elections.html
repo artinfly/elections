@@ -1,193 +1,290 @@
 {% extends "base.html" %}
+
 {% block title %}Голосование{% endblock %}
+
 {% block content %}
-{# Шапка страницы: заголовок и число найденных по текущим фильтрам #}
+{# ========================================================================== #}
+{# Шапка страницы: заголовок и индикатор количества найденных сотрудников     #}
+{# ========================================================================== #}
 <div class="page-header">
     <h5>Голосование</h5>
     <span class="row-count-label">Найдено: {{ found }}</span>
 </div>
 
-{% comment %} {# Карточки-счётчики фактической явки по способам (counts.voted).
-  ВАЖНО: порядок .dash-card-num в DOM должен совпадать с индексами в setCounts():
-  0=ДЭГ, 1=УИК, 2=УВЗ, 3=УИК-19, 4=ИТОГО, 5=Пусто УИК. #} {% endcomment %}
+{# ========================================================================== #}
+{# Карточки-счётчики фактической явки (counts.voted)                          #}
+{# ВАЖНО: Порядок .dash-card-num в DOM строго соответствует индексам в JS:    #}
+{# 0=ДЭГ, 1=УИК, 2=УВЗ, 3=УИК-19, 4=ИТОГО, 5=Пусто УИК.                      #}
+{# ========================================================================== #}
 <div class="dash-row mb-4">
-    {# Проголосовали через ДЭГ #}
+    {# 0: Проголосовали через ДЭГ #}
     <div>
         <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(37,99,235,.12);color:#2563eb">Д</div>
-            <div><div class="dash-card-num">{{ counts.voted.deg }}</div><div class="dash-card-lbl">ДЭГ</div></div>
+            <div>
+                <div class="dash-card-num">{{ counts.voted.deg }}</div>
+                <div class="dash-card-lbl">ДЭГ</div>
+            </div>
         </div>
     </div>
-    {% comment %} {# УИК: карточка-кнопка, открывает модалку с разбивкой по участкам;
-      data-turnout="1" включает в модалке колонки явки (app.js) #} {% endcomment %}
+    
+    {# 1: УИК (интерактивная карточка, открывает модалку с разбивкой по участкам) #}
     <div>
         <button type="button" class="dash-card dash-card-action" id="uik-card" data-turnout="1"
                 title="Показать распределение по участкам">
             <div class="dash-card-icon" style="background:rgba(42,120,214,.12);color:#2a78d6">У</div>
-            <div><div class="dash-card-num">{{ counts.voted.uik }}</div><div class="dash-card-lbl">УИК<span class="dash-card-more">по участкам</span></div></div>
+            <div>
+                <div class="dash-card-num">{{ counts.voted.uik }}</div>
+                <div class="dash-card-lbl">УИК<span class="dash-card-more">по участкам</span></div>
+            </div>
         </button>
     </div>
-    {# Проголосовали на участке УВЗ #}
+    
+    {# 2: Проголосовали на участке УВЗ #}
     <div>
         <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(235,104,52,.12);color:#eb6834">В</div>
-            <div><div class="dash-card-num">{{ counts.voted.uvz }}</div><div class="dash-card-lbl">УИК-УВЗ</div></div>
+            <div>
+                <div class="dash-card-num">{{ counts.voted.uvz }}</div>
+                <div class="dash-card-lbl">УИК-УВЗ</div>
+            </div>
         </div>
     </div>
-    {# Проголосовали на УИК-19 #}
+    
+    {# 3: Проголосовали на УИК-19 #}
     <div>
         <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(124,58,237,.12);color:#7c3aed">19</div>
-            <div><div class="dash-card-num">{{ counts.voted.u19 }}</div><div class="dash-card-lbl">УИК-19</div></div>
+            <div>
+                <div class="dash-card-num">{{ counts.voted.u19 }}</div>
+                <div class="dash-card-lbl">УИК-19</div>
+            </div>
         </div>
     </div>
-    {# Всего проголосовавших #}
+    
+    {# 4: Всего проголосовавших #}
     <div>
         <div class="dash-card">
             <div class="dash-card-icon" style="background:rgba(22,163,74,.12);color:#16a34a">Σ</div>
-            <div><div class="dash-card-num">{{ counts.voted.total }}</div><div class="dash-card-lbl">ИТОГО</div></div>
+            <div>
+                <div class="dash-card-num">{{ counts.voted.total }}</div>
+                <div class="dash-card-lbl">ИТОГО</div>
+            </div>
         </div>
     </div>
-    {# Красная карточка: сотрудники без привязки к УИК #}
+    
+    {# 5: Красная карточка: сотрудники без привязки к УИК #}
     <div>
         <div class="dash-card red">
             <div class="dash-card-icon" style="background:rgba(190,12,12,.12);color:#be0c0c">!</div>
-            <div><div class="dash-card-num">{{ counts.no_uik }}</div><div class="dash-card-lbl">Пусто УИК</div></div>
+            <div>
+                <div class="dash-card-num">{{ counts.no_uik }}</div>
+                <div class="dash-card-lbl">Пусто УИК</div>
+            </div>
         </div>
     </div>
 </div>
 
-{# Фильтры в режиме явки: появляются селекты "Явка" и "Где голосовал" #}
+{# ========================================================================== #}
+{# Панель фильтров (в режиме явки добавляются селекты "Явка" и "Где голосовал")#}
+{# ========================================================================== #}
 {% include "_filters.html" with with_status=1 %}
 
+{# ========================================================================== #}
 {# Блок массовых действий: отметка/снятие явки сразу у всей отфильтрованной выборки #}
+{# ========================================================================== #}
 <div class="card-block mb-3">
     <div class="d-flex flex-wrap gap-2 align-items-center">
         <button class="btn-orange" type="button" id="bulk-on">Отметить всех отфильтрованных</button>
         <button class="btn-ghost" type="button" id="bulk-off">Снять отметку</button>
         <span class="row-count-label">будет затронуто записей: {{ found }}</span>
     </div>
-    {# Сообщение с итогом массовой операции (сколько изменено/пропущено) #}
-    <div class="ok-msg" id="bulk-msg" style="display:none"></div>
+    {# Контейнер для сообщения с итогом массовой операции (сколько изменено/пропущено) #}
+    <div class="ok-msg" id="bulk-msg" style="display:none" role="status"></div>
 </div>
 
-{# Таблица сотрудников: кнопка явки в строке и бейдж с фактическим местом голосования #}
+{# ========================================================================== #}
+{# Таблица сотрудников                                                        #}
+{# В заголовке 7 колонок. В теле строки должно быть ровно 7 ячеек <td>.       #}
+{# ========================================================================== #}
 <div class="table-container">
-<table class="report-table">
-    <thead><tr>
-        <th>Цех</th><th>Таб№</th><th>ФИО</th><th>Округ</th><th>УИК</th>
-        <th class="col-turnout-simple">Явка</th>
-        <th class="col-turnout">Где голосовал</th>
-    </tr></thead>
-    <tbody>
-    {% for r in rows %}
-        <tr>
-            <td>{{ r.department }}</td>
-            <td>{{ r.tab_number }}</td>
-            <td class="wrap">{{ r.fio }}</td>
-            <td>{{ r.okrug }}</td>
-            <td>{{ r.uik }}</td>
-            <td class="col-turnout-simple">
-                {% comment %} {# Кнопка явки: data-id — ID сотрудника, data-plan — подпись запланированного
-                   способа (показывается в бейдже после отметки). #} {% endcomment %}
-                <button type="button" class="vote-btn {% if r.voted %}on{% endif %}"
-                        data-id="{{ r.id }}" data-plan="{{ r.method_label }}">
-                    {% if r.voted %}Проголосовал{% else %}Не голосовал{% endif %}
-                </button>
-            </td>
-            <td class="col-turnout">
+    <table class="report-table">
+        <thead>
+            <tr>
+                <th>Цех</th>
+                <th>Таб№</th>
+                <th>ФИО</th>
+                <th>Округ</th>
+                <th>УИК</th>
+                <th class="col-turnout-simple">Явка</th>
+                <th class="col-turnout">Где голосовал</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for r in rows %}
+            <tr>
+                <td>{{ r.department }}</td>
+                <td>{{ r.tab_number }}</td>
+                <td class="wrap">{{ r.fio }}</td>
+                <td>{{ r.okrug }}</td>
+                <td>{{ r.uik }}</td>
+                
+                {# Кнопка явки: data-plan содержит подпись запланированного способа #}
+                <td class="col-turnout-simple">
+                    <button type="button" class="vote-btn {% if r.voted %}on{% endif %}"
+                            data-id="{{ r.id }}" data-plan="{{ r.method_label }}">
+                        {% if r.voted %}Проголосовал{% else %}Не голосовал{% endif %}
+                    </button>
+                </td>
+                
                 {# Бейдж с местом голосования виден только если voted_method заполнен #}
-                <span class="place-badge"{% if not r.voted_method %} hidden{% endif %}>{{ r.voted_method_label }}</span>
-            </td>
-        </tr>
-    {% empty %}
-        <tr><td colspan="7">Нет данных</td></tr>
-    {% endfor %}
-    </tbody>
-</table>
+                <td class="col-turnout">
+                    <span class="place-badge"{% if not r.voted_method %} hidden{% endif %}>
+                        {{ r.voted_method_label }}
+                    </span>
+                </td>
+            </tr>
+        {% empty %}
+            {# Заглушка для пустой выборки. colspan=7, так как в таблице 7 колонок #}
+            <tr><td colspan="7" class="text-center">Нет данных</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
 </div>
-{# Пагинация списка #}
+
+{# ========================================================================== #}
+{# Пагинация списка                                                           #}
+{# ========================================================================== #}
 {% include "_pagination.html" %}
 {% endblock %}
 
 {% block scripts %}
 <script>
-// Обновляет карточки-счётчики сверху свежими данными с сервера.
-// Порядок индексов соответствует порядку .dash-card-num в DOM (см. комментарий у dash-row).
-function setCounts(c) {
-    var n = document.querySelectorAll('.dash-card-num');
-    n[0].textContent = c.voted.deg;
-    n[1].textContent = c.voted.uik;
-    n[2].textContent = c.voted.uvz;
-    n[3].textContent = c.voted.u19;
-    n[4].textContent = c.voted.total;
-    n[5].textContent = c.no_uik;
-}
+    // Флаг прав доступа: если пользователь в группе viewer, редактирование блокируется.
+    const canEdit = {% if can_edit %}true{% else %}false{% endif %};
+    
+    // Текущий размер выборки (подставляется из контекста страницы).
+    var FOUND = {{ found }};
+    // Порог, после которого массовая операция требует подтверждения.
+    var BULK_LIMIT = 100;
 
-// Перерисовывает строку таблицы после отметки явки:
-// состояние кнопки и бейдж с местом голосования (берётся из запланированного способа).
-function paint(row, voted) {
-    var btn = row.querySelector('.vote-btn');
-    btn.classList.toggle('on', voted);
-    btn.textContent = voted ? 'Проголосовал' : 'Не голосовал';
-    var place = row.querySelector('.place-badge');
-    place.textContent = voted ? btn.dataset.plan : '';
-    place.hidden = !place.textContent;
-}
-
-// Одиночная отметка явки кликом по кнопке в строке.
-// Отметить можно только сотрудника с выбранным способом голосования (data-plan).
-const canEdit = {% if can_edit %}true{% else %}false{% endif %}
-document.querySelectorAll('.vote-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-        if (!canEdit) return; 
-        var row = btn.closest('tr');
-        var voted = !btn.classList.contains('on');
-        if (voted && !btn.dataset.plan) {
-            alert('Сначала выберите способ голосования на странице "Способ голосования".');
-            return;
+    // ========================================================================
+    // Вспомогательная функция: сбор текущих фильтров из URL
+    // ========================================================================
+    // Читает GET-параметры из адресной строки браузера и формирует объект.
+    // Критически важно передавать эти фильтры на сервер при одиночных и массовых
+    // операциях, чтобы действия применялись только к текущей выборке, а не ко всей базе.
+    function getFilters() {
+        var params = new URLSearchParams(window.location.search);
+        var filters = {};
+        for (var pair of params.entries()) {
+            // Исключаем параметр пагинации, он не является фильтром данных.
+            if (pair[0] !== 'page') {
+                filters[pair[0]] = pair[1];
+            }
         }
-        postJSON('/api/voted/', {id: btn.dataset.id, voted: voted}).then(function (c) {
-            paint(row, voted);
-            setCounts(c);
-        });
-    });
-});
-
-// Текущий размер выборки (подставляется из контекста страницы)
-var FOUND = {{ found }}
-// Порог, после которого массовая операция требует подтверждения
-var BULK_LIMIT = 100;
-
-// Массовая отметка/снятие явки по всей отфильтрованной выборке.
-// При большой выборке спрашивает подтверждение, после ответа сервера
-// обновляет счётчики, сообщение и перерисовывает видимые строки.
-function bulk(voted) {
-    if (!canEdit) return;
-    if (FOUND >= BULK_LIMIT) {
-        var action = voted ? 'Отметить явку' : 'Снять отметку';
-        if (!confirm(action + ' сразу у ' + FOUND + ' записей?\n\nОтменить это одним действием не получится.')) {
-            return;
-        }
+        return filters;
     }
-    postJSON('/api/bulk-voted/', {voted: voted}).then(function (c) {
-        setCounts(c);
-        var msg = document.getElementById('bulk-msg');
-        msg.textContent = 'Изменено записей: ' + c.changed;
-        if (c.skipped) {
-            msg.textContent += '. Пропущено без способа голосования: ' + c.skipped;
-        }
-        msg.style.display = 'block';
-        // Перерисовываем строки на странице; сотрудников без способа при отметке пропускаем
-        document.querySelectorAll('.report-table tbody tr').forEach(function (row) {
-            var btn = row.querySelector('.vote-btn');
-            if (!btn) return;
-            if (voted && !btn.dataset.plan) return;
-            paint(row, voted);
+
+    // ========================================================================
+    // Обновление карточек-счётчиков (дашборда)
+    // ========================================================================
+    // Принимает JSON с сервера и обновляет текст в карточках.
+    // Порядок индексов строго соответствует порядку .dash-card-num в DOM.
+    function setCounts(c) {
+        var n = document.querySelectorAll('.dash-card-num');
+        n[0].textContent = c.voted.deg;
+        n[1].textContent = c.voted.uik;
+        n[2].textContent = c.voted.uvz;
+        n[3].textContent = c.voted.u19;
+        n[4].textContent = c.voted.total;
+        n[5].textContent = c.no_uik;
+    }
+
+    // ========================================================================
+    // Перерисовка строки таблицы
+    // ========================================================================
+    // Обновляет визуальное состояние кнопки явки и бейджа с местом голосования.
+    function paint(row, voted) {
+        var btn = row.querySelector('.vote-btn');
+        btn.classList.toggle('on', voted);
+        btn.textContent = voted ? 'Проголосовал' : 'Не голосовал';
+        
+        var place = row.querySelector('.place-badge');
+        // Если явка отмечена, показываем запланированный способ (из data-plan).
+        place.textContent = voted ? btn.dataset.plan : '';
+        place.hidden = !place.textContent;
+    }
+
+    // ========================================================================
+    // Одиночная отметка явки (клик по кнопке в строке)
+    // ========================================================================
+    document.querySelectorAll('.vote-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            if (!canEdit) return; 
+            
+            var row = btn.closest('tr');
+            var voted = !btn.classList.contains('on');
+            
+            // Бизнес-правило: нельзя отметить явку, если не выбран способ голосования.
+            if (voted && !btn.dataset.plan) {
+                alert('Сначала выберите способ голосования на странице "Способ голосования".');
+                return;
+            }
+            
+            postJSON('/api/voted/', {
+                id: btn.dataset.id, 
+                voted: voted,
+                filters: getFilters() // Передаем фильтры для корректного пересчета счетчиков
+            }).then(function (c) {
+                paint(row, voted);
+                setCounts(c);
+            });
         });
     });
-}
-document.getElementById('bulk-on').addEventListener('click', function () { bulk(true); });
-document.getElementById('bulk-off').addEventListener('click', function () { bulk(false); });
+
+    // ========================================================================
+    // Массовая отметка/снятие явки
+    // ========================================================================
+    // Применяет действие ко всей отфильтрованной выборке.
+    function bulk(voted) {
+        if (!canEdit) return;
+        
+        // Защита от случайного клика на большой выборке.
+        if (FOUND >= BULK_LIMIT) {
+            var action = voted ? 'Отметить явку' : 'Снять отметку';
+            if (!confirm(action + ' сразу у ' + FOUND + ' записей?\n\nОтменить это одним действием не получится.')) {
+                return;
+            }
+        }
+        
+        postJSON('/api/bulk-voted/', {
+            voted: voted,
+            filters: getFilters() // КРИТИЧНО: передаем фильтры, чтобы сервер не трогал всю базу
+        }).then(function (c) {
+            setCounts(c);
+            
+            // Показываем сообщение с итогами операции.
+            var msg = document.getElementById('bulk-msg');
+            msg.textContent = 'Изменено записей: ' + c.changed;
+            if (c.skipped) {
+                msg.textContent += '. Пропущено без способа голосования: ' + c.skipped;
+            }
+            msg.style.display = 'block';
+            
+            // Перерисовываем видимые строки на текущей странице пагинации.
+            document.querySelectorAll('.report-table tbody tr').forEach(function (row) {
+                var btn = row.querySelector('.vote-btn');
+                if (!btn) return;
+                // При отметке явки пропускаем сотрудников без выбранного способа.
+                if (voted && !btn.dataset.plan) return;
+                paint(row, voted);
+            });
+        });
+    }
+
+    // Привязка обработчиков к кнопкам массовых действий.
+    document.getElementById('bulk-on').addEventListener('click', function () { bulk(true); });
+    document.getElementById('bulk-off').addEventListener('click', function () { bulk(false); });
 </script>
 {% endblock %}

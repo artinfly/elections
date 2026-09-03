@@ -1,8 +1,10 @@
 """
-Модуль представлений (Views).
+Модуль контроллеров (Views).
 
-Обрабатывает HTTP-запросы, управляет доступом, рендерит страницы
-и отдает ответы с данными или файлами.
+Описание:
+    Принимает HTTP-запросы от браузера, проверяет права доступа пользователя,
+    обращается к базе данных через модели и возвращает либо HTML-страницу,
+    либо скачиваемый файл (Excel/ZIP), либо JSON-ответ для асинхронных кнопок.
 """
 
 import json
@@ -35,7 +37,10 @@ from .reports import (
 # Константы
 # ==============================================================================
 
+# Количество сотрудников на одной странице таблицы.
 PER_PAGE = 100
+
+# Варианты фильтрации по избирательным округам для конструктора отчетов.
 CUSTOM_OKRUG_OPTIONS = [
     ("", "Все"),
     ("none", "Пусто"),
@@ -44,6 +49,10 @@ CUSTOM_OKRUG_OPTIONS = [
     ("21", "21"),
     ("20+21", "20+21"),
 ]
+
+# Связь полей отметок в базе с кодами способов голосования.
+# Используется для проверки: нельзя поставить отметку о регистрации на ДЭГ,
+# если сотрудник выбрал голосование на обычном участке.
 MARK_FIELDS = {"mark_deg": DEG, "mark_uvz": UVZ}
 
 
@@ -54,39 +63,52 @@ MARK_FIELDS = {"mark_deg": DEG, "mark_uvz": UVZ}
 
 def is_operator(user: Any) -> bool:
     """
-    Проверяет, является ли пользователь оператором или суперюзером.
+    Проверяет наличие прав оператора или суперпользователя.
+
+    Описание:
+        Операторы имеют доступ к загрузке файлов и административным функциям.
+        Суперпользователь имеет все права по умолчанию.
 
     Аргументы:
-        user: объект пользователя Django
+        user: объект пользователя Django.
 
     Возвращает:
-        True если пользователь имеет права оператора
+        bool: True, если пользователь имеет права оператора.
     """
     return user.is_superuser or user.groups.filter(name="operator").exists()
 
 
 def can_edit(user: Any) -> bool:
     """
-    Проверяет, может ли пользователь редактировать данные.
+    Проверяет право пользователя на редактирование данных.
+
+    Описание:
+        Все авторизованные пользователи могут редактировать данные,
+        кроме тех, кто явно добавлен в группу 'viewer' (только просмотр).
 
     Аргументы:
-        user: объект пользователя Django
+        user: объект пользователя Django.
 
     Возвращает:
-        True если пользователь не в группе viewer
+        bool: True, если пользователю разрешено вносить изменения.
     """
     return not user.groups.filter(name="viewer").exists()
 
 
 def _known_method(value: Any) -> str:
     """
-    Валидирует значение способа голосования.
+    Валидирует код способа голосования.
+
+    Описание:
+        Проверяет, что переданное значение является одним из зарегистрированных
+        кодов (deg, uik, uvz, u19). Если передан мусор — возвращает пустую строку,
+        чтобы избежать записи невалидных данных в базу.
 
     Аргументы:
-        value: код способа голосования
+        value: код способа голосования.
 
     Возвращает:
-        Код способа если валиден, иначе пустая строка
+        str: Валидный код способа или пустая строка.
     """
     return str(value) if value in METHOD_LABELS else ""
 
@@ -95,13 +117,17 @@ def _parse_json_body(
     request: HttpRequest,
 ) -> tuple[Optional[dict], Optional[JsonResponse]]:
     """
-    Безопасно парсит JSON из тела POST-запроса.
+    Безопасно извлекает JSON из тела POST-запроса.
+
+    Описание:
+        Защищает сервер от падения с ошибкой 500, если фронтенд прислал
+        битый или пустой JSON. В случае ошибки парсинга сразу формирует ответ.
 
     Аргументы:
-        request: HTTP запрос
+        request: HTTP-запрос.
 
     Возвращает:
-        Кортеж (данные, ошибка). Если ошибка не None — вернуть её как ответ.
+        tuple: (словарь с данными, объект ошибки). Если ошибка есть, её нужно вернуть клиенту.
     """
     try:
         return json.loads(request.body or "{}"), None
@@ -111,13 +137,17 @@ def _parse_json_body(
 
 def _safe_int(value: Any) -> Optional[int]:
     """
-    Безопасно преобразует значение в int.
+    Безопасно преобразует значение в целое число.
+
+    Описание:
+        Используется для чтения ID из JSON. Если фронтенд передал строку или null,
+        функция вернет None, что позволит корректно обработать ошибку 400.
 
     Аргументы:
-        value: значение для преобразования
+        value: значение для преобразования.
 
     Возвращает:
-        Целое число или None при ошибке
+        int или None: число при успехе, None при ошибке.
     """
     try:
         return int(value)
@@ -127,18 +157,19 @@ def _safe_int(value: Any) -> Optional[int]:
 
 def _clean(params: dict, key: str) -> str:
     """
-    Безопасно достаёт строковый параметр из словаря.
+    Безопасно извлекает строковый параметр из словаря.
 
-    request.GET всегда отдаёт строки, но JSON-фильтры из API могут
-    содержать что угодно (числа, списки) — всё, кроме str, считаем
-    пустым значением, чтобы не падать с 500.
+    Описание:
+        URL-параметры всегда приходят как строки, но JSON-фильтры из API могут
+        содержать числа или списки. Функция приводит всё к строке и удаляет
+        пробелы по краям. Нестроковые значения считаются пустыми.
 
     Аргументы:
-        params: словарь параметров (request.GET или JSON-фильтры)
-        key: имя параметра
+        params: словарь параметров (request.GET или JSON).
+        key: имя параметра.
 
     Возвращает:
-        Строку без пробелов по краям или ""
+        str: очищенная строка или пустая строка.
     """
     value = params.get(key)
     return value.strip() if isinstance(value, str) else ""
@@ -146,14 +177,19 @@ def _clean(params: dict, key: str) -> str:
 
 def _make_excel_response(workbook: Any, filename_prefix: str) -> HttpResponse:
     """
-    Создает HTTP-ответ с Excel-файлом для скачивания.
+    Формирует HTTP-ответ для скачивания Excel-файла браузером.
+
+    Описание:
+        Устанавливает правильные заголовки, чтобы браузер понял, что нужно
+        скачать файл, а не пытаться отобразить его на странице.
+        В имя файла добавляется текущая дата и время.
 
     Аргументы:
-        workbook: объект openpyxl Workbook
-        filename_prefix: префикс имени файла
+        workbook: объект книги openpyxl.
+        filename_prefix: базовая часть имени файла (например, "svodka").
 
     Возвращает:
-        HttpResponse с Excel-файлом
+        HttpResponse с прикрепленным Excel-файлом.
     """
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -168,13 +204,17 @@ def _make_excel_response(workbook: Any, filename_prefix: str) -> HttpResponse:
 
 def _validate_excel_file(file: Any) -> None:
     """
-    Проверяет, что загруженный файл имеет расширение .xlsx.
+    Проверяет расширение загружаемого файла.
+
+    Описание:
+        Система принимает только файлы формата Excel (.xlsx).
+        Попытка загрузить CSV или картинку будет пресечена.
 
     Аргументы:
-        file: загруженный файл из request.FILES
+        file: объект загруженного файла из request.FILES.
 
     Исключения:
-        ValueError: если файл не Excel или отсутствует
+        ValueError: если файл отсутствует или имеет неверное расширение.
     """
     if not file or not file.name.lower().endswith(".xlsx"):
         raise ValueError("Ошибка: принимается только формат .xlsx")
@@ -182,17 +222,22 @@ def _validate_excel_file(file: Any) -> None:
 
 def _get_filter_options() -> dict[str, list[str]]:
     """
-    Получает уникальные значения для всех фильтров одним запросом к БД.
+    Получает уникальные значения для всех выпадающих списков фильтров.
+
+    Описание:
+        Делает один широкий запрос к базе, чтобы собрать все уникальные цеха,
+        производства и УИКи. Это работает быстрее, чем делать 5 отдельных
+        SQL-запросов (оптимизация N+1).
 
     Возвращает:
-        Словарь с отсортированными списками уникальных значений
+        dict: словари с отсортированными списками уникальных значений.
     """
-    # Один запрос получает все данные вместо 5 отдельных
+    # Один запрос получает все нужные поля сразу.
     employees = Employee.objects.values(
         "department", "production", "service", "okrug", "uik"
     )
 
-    # Извлекаем уникальные значения в Python (быстрее чем 5 SQL запросов)
+    # Извлекаем уникальные значения средствами Python (быстрее SQL DISTINCT для малых объемов).
     departments = sorted({e["department"] for e in employees if e["department"]})
     productions = sorted({e["production"] for e in employees if e["production"]})
     services = sorted({e["service"] for e in employees if e["service"]})
@@ -215,17 +260,22 @@ def _get_filter_options() -> dict[str, list[str]]:
 
 def _filtered(params: dict) -> QuerySet:
     """
-    Строит QuerySet сотрудников на основе параметров фильтрации.
+    Строит выборку (QuerySet) сотрудников на основе переданных фильтров.
+
+    Описание:
+        Применяет фильтры из URL-параметров или JSON. Поддерживает поиск
+        по частям ФИО и специфичные фильтры (например, "Пусто" для округа).
 
     Аргументы:
-        params: словарь с параметрами из request.GET или JSON-фильтров
+        params: словарь с параметрами фильтрации.
 
     Возвращает:
-        Отфильтрованный QuerySet сотрудников
+        QuerySet: отфильтрованный список сотрудников.
     """
     qs = Employee.objects.all()
 
-    # Поиск по ФИО и табельному номеру (разбиваем на слова для гибкого поиска)
+    # Гибкий поиск по ФИО и табельному номеру.
+    # Разбиваем фразу на слова: поиск "иван иванов" найдет "Иванов Иван Иванович".
     search = _clean(params, "q")
     for part in search.split():
         qs = qs.filter(
@@ -235,7 +285,7 @@ def _filtered(params: dict) -> QuerySet:
             | Q(patronymic__icontains=part)
         )
 
-    # Простые фильтры: маппинг параметр -> поле модели
+    # Простые фильтры (точное совпадение).
     filter_mapping = {
         "dep": "department",
         "production": "production",
@@ -248,7 +298,7 @@ def _filtered(params: dict) -> QuerySet:
         if value:
             qs = qs.filter(**{field: value})
 
-    # Фильтры со специальной логикой (пустое значение как "none")
+    # Специфичные фильтры с поддержкой значения "none" (Пусто).
     okrug = _clean(params, "okrug")
     if okrug == "none":
         qs = qs.filter(okrug="")
@@ -278,31 +328,36 @@ def _filtered(params: dict) -> QuerySet:
 
 def _counts(qs: Optional[QuerySet] = None) -> dict[str, Any]:
     """
-    Считает агрегированную статистику одним запросом к БД.
+    Считает агрегированную статистику одним SQL-запросом.
+
+    Описание:
+        Возвращает количество людей по каждому способу голосования (план)
+        и по фактической явке. Используется для обновления счетчиков (плашек)
+        в верхней части страницы без перезагрузки.
 
     Аргументы:
-        qs: QuerySet для подсчета (по умолчанию все сотрудники)
+        qs: QuerySet для подсчета (по умолчанию все сотрудники).
 
     Возвращает:
-        Словарь со статистикой по способам голосования и явке
+        dict: структура данных со статистикой.
     """
     base = qs if qs is not None else Employee.objects.all()
     agg = base.aggregate(
-        # План по способам голосования
+        # План по способам голосования.
         plan_deg=Count("id", filter=Q(method=DEG)),
         plan_uik=Count("id", filter=Q(method=UIK)),
         plan_uvz=Count("id", filter=Q(method=UVZ)),
         plan_u19=Count("id", filter=Q(method=UIK19)),
         plan_none=Count("id", filter=Q(method="")),
         plan_total=Count("id"),
-        # Фактическая явка
+        # Фактическая явка (только те, у кого voted=True).
         voted_deg=Count("id", filter=Q(voted=True, voted_method=DEG)),
         voted_uik=Count("id", filter=Q(voted=True, voted_method=UIK)),
         voted_uvz=Count("id", filter=Q(voted=True, voted_method=UVZ)),
         voted_u19=Count("id", filter=Q(voted=True, voted_method=UIK19)),
         voted_none=Count("id", filter=Q(voted=True, voted_method="")),
         voted_total=Count("id", filter=Q(voted=True)),
-        # Сотрудники без УИК
+        # Служебная статистика.
         no_uik=Count("id", filter=Q(uik="")),
     )
     return {
@@ -330,12 +385,16 @@ def _page_window(page: Any, size: int = 5) -> range:
     """
     Вычисляет диапазон номеров страниц для пагинатора.
 
+    Описание:
+        Формирует "окно" из нескольких страниц вокруг текущей, чтобы не показывать
+        все 100 страниц в подвале таблицы, а только ближайшие (например, 3, 4, [5], 6, 7).
+
     Аргументы:
-        page: объект Page из Django Paginator
-        size: количество страниц в окне (по умолчанию 5)
+        page: объект Page из Django Paginator.
+        size: количество страниц в окне.
 
     Возвращает:
-        range с номерами страниц для отображения
+        range: диапазон номеров страниц.
     """
     total = page.paginator.num_pages
     current = page.number
@@ -354,20 +413,24 @@ def _page_window(page: Any, size: int = 5) -> range:
 
 def _context(request: HttpRequest) -> dict[str, Any]:
     """
-    Готовит общий контекст для страниц со списками сотрудников.
+    Готовит общий контекст для рендеринга HTML-страниц со списками.
+
+    Описание:
+        Собирает все данные, нужные шаблонам: текущую страницу, фильтры,
+        статистику и списки для выпадающих меню.
 
     Аргументы:
-        request: HTTP запрос
+        request: HTTP-запрос.
 
     Возвращает:
-        Словарь контекста для шаблона
+        dict: контекст для передачи в функцию render().
     """
     qs = _filtered(request.GET)
     page = Paginator(qs, PER_PAGE).get_page(request.GET.get("page"))
     params = request.GET.copy()
     params.pop("page", None)
 
-    # Получаем все опции фильтров одним запросом (оптимизация N+1)
+    # Получаем опции фильтров одним запросом (оптимизация N+1).
     filter_options = _get_filter_options()
 
     return {
@@ -397,13 +460,7 @@ def _context(request: HttpRequest) -> dict[str, Any]:
 @login_required
 def method_page(request: HttpRequest) -> HttpResponse:
     """
-    Страница со списком сотрудников для простановки способа голосования.
-
-    Аргументы:
-        request: HTTP запрос
-
-    Возвращает:
-        HttpResponse с отрендеренным шаблоном
+    Главная страница: список сотрудников для простановки способа голосования.
     """
     return render(request, "method.html", _context(request))
 
@@ -411,13 +468,7 @@ def method_page(request: HttpRequest) -> HttpResponse:
 @login_required
 def elections_page(request: HttpRequest) -> HttpResponse:
     """
-    Страница со списком сотрудников для отметки явки.
-
-    Аргументы:
-        request: HTTP запрос
-
-    Возвращает:
-        HttpResponse с отрендеренным шаблоном
+    Страница выборов: список сотрудников для отметки фактической явки.
     """
     return render(request, "elections.html", _context(request))
 
@@ -425,13 +476,7 @@ def elections_page(request: HttpRequest) -> HttpResponse:
 @login_required
 def upload_page(request: HttpRequest) -> HttpResponse:
     """
-    Страница загрузки файлов (доступна только операторам).
-
-    Аргументы:
-        request: HTTP запрос
-
-    Возвращает:
-        HttpResponse с отрендеренным шаблоном или страницей отказа в доступе
+    Страница загрузки файлов из Excel (доступна только операторам).
     """
     if not is_operator(request.user):
         return render(request, "access_denied.html", {"is_operator": False})
@@ -450,13 +495,7 @@ def upload_page(request: HttpRequest) -> HttpResponse:
 @login_required
 def export_page(request: HttpRequest) -> HttpResponse:
     """
-    Страница со списком доступных отчетов и формой конструктора.
-
-    Аргументы:
-        request: HTTP запрос
-
-    Возвращает:
-        HttpResponse с отрендеренным шаблоном
+    Страница экспорта: список готовых отчетов и конструктор кастомных сводок.
     """
     filter_options = _get_filter_options()
 
@@ -466,10 +505,7 @@ def export_page(request: HttpRequest) -> HttpResponse:
         {
             "counts": _counts(),
             "is_operator": is_operator(request.user),
-            # Считаем количеством в уже полученных списках — без лишних запросов
             "departments_count": len(filter_options["departments"]),
-            # «Производства» отчётов живут в поле service (см. комментарий
-            # в reports.py) — считаем уникальные непустые service
             "productions_count": len(filter_options["services"]),
             "msg": request.session.pop("msg", ""),
             "productions": filter_options["productions"],
@@ -491,13 +527,7 @@ def export_page(request: HttpRequest) -> HttpResponse:
 @require_POST
 def upload_base(request: HttpRequest) -> HttpResponse:
     """
-    Обработчик загрузки основной базы сотрудников.
-
-    Аргументы:
-        request: HTTP запрос с файлом
-
-    Возвращает:
-        Редирект на страницу загрузки с сообщением в сессии
+    Обработчик формы загрузки основного списка сотрудников.
     """
     if not is_operator(request.user):
         return JsonResponse({"error": "нет прав"}, status=403)
@@ -524,13 +554,7 @@ def upload_base(request: HttpRequest) -> HttpResponse:
 @require_POST
 def upload_voting_choices(request: HttpRequest) -> HttpResponse:
     """
-    Обработчик загрузки отчета штаба для обновления способов голосования.
-
-    Аргументы:
-        request: HTTP запрос с файлом
-
-    Возвращает:
-        Редирект на страницу загрузки с сообщением в сессии
+    Обработчик формы загрузки отчета штаба (обновление способов голосования).
     """
     if not is_operator(request.user):
         return JsonResponse({"error": "нет прав"}, status=403)
@@ -554,7 +578,7 @@ def upload_voting_choices(request: HttpRequest) -> HttpResponse:
 
 
 # ==============================================================================
-# API endpoints
+# API endpoints (Асинхронные запросы без перезагрузки страницы)
 # ==============================================================================
 
 
@@ -562,15 +586,8 @@ def upload_voting_choices(request: HttpRequest) -> HttpResponse:
 @require_POST
 def api_method(request: HttpRequest) -> JsonResponse:
     """
-    API: обновление способа голосования для одного сотрудника.
-
-    Аргументы:
-        request: POST запрос с JSON {id, method, filters}
-
-    Возвращает:
-        JSON с обновленной статистикой или ошибкой (400/403/404)
+    API: обновление запланированного способа голосования для одного сотрудника.
     """
-    # Viewer может только смотреть: проверяем право на сервере, а не в шаблоне
     if not can_edit(request.user):
         return JsonResponse({"error": "нет прав"}, status=403)
 
@@ -588,6 +605,7 @@ def api_method(request: HttpRequest) -> JsonResponse:
     if not changed:
         return JsonResponse({"error": "работник не найден"}, status=404)
 
+    # Возвращаем обновленную статистику для перерисовки плашек на фронте.
     return JsonResponse(_counts(_filtered(data.get("filters") or {})))
 
 
@@ -595,13 +613,7 @@ def api_method(request: HttpRequest) -> JsonResponse:
 @require_POST
 def api_mark(request: HttpRequest) -> JsonResponse:
     """
-    API: простановка отметок регистрации (mark_deg, mark_uvz).
-
-    Аргументы:
-        request: POST запрос с JSON {id, field, value}
-
-    Возвращает:
-        JSON с новым значением поля или ошибкой (400/403/404)
+    API: простановка отметок регистрации (ДЭГ или УВЗ).
     """
     if not can_edit(request.user):
         return JsonResponse({"error": "нет прав"}, status=403)
@@ -618,31 +630,23 @@ def api_mark(request: HttpRequest) -> JsonResponse:
     if field not in MARK_FIELDS:
         return JsonResponse({"error": "неизвестное поле"}, status=400)
 
-    person = Employee.objects.filter(pk=employee_id).first()
-    if person is None:
-        return JsonResponse({"error": "работник не найден"}, status=404)
+    employee = get_object_or_404(Employee.objects, pk=employee_id)
 
-    # Проверка бизнес-логики: отметка должна соответствовать способу
-    if person.method != MARK_FIELDS[field]:
+    # Проверка бизнес-логики: отметка должна соответствовать выбранному способу.
+    if employee.method != MARK_FIELDS[field]:
         return JsonResponse({"error": "способ не соответствует полю"}, status=400)
 
-    setattr(person, field, bool(data.get("value")))
-    person.save(update_fields=[field])
+    setattr(employee, field, bool(data.get("value")))
+    employee.save(update_fields=[field])
 
-    return JsonResponse({field: getattr(person, field)})
+    return JsonResponse({field: getattr(employee, field)})
 
 
 @login_required
 @require_POST
 def api_voted(request: HttpRequest) -> JsonResponse:
     """
-    API: отметка явки для одного сотрудника.
-
-    Аргументы:
-        request: POST запрос с JSON {id, voted, filters}
-
-    Возвращает:
-        JSON с обновленной статистикой или ошибкой (400/403/404)
+    API: отметка фактической явки для одного сотрудника.
     """
     if not can_edit(request.user):
         return JsonResponse({"error": "нет прав"}, status=403)
@@ -655,15 +659,14 @@ def api_voted(request: HttpRequest) -> JsonResponse:
     if employee_id is None:
         return JsonResponse({"error": "некорректный ID"}, status=400)
 
-    person = Employee.objects.filter(pk=employee_id).first()
-    if person is None:
-        return JsonResponse({"error": "работник не найден"}, status=404)
+    employee = get_object_or_404(Employee.objects, pk=employee_id)
 
     voted = bool(data.get("voted"))
-    if voted and not person.method:
+    # Нельзя отметить явку, если сотрудник еще не выбрал способ голосования.
+    if voted and not employee.method:
         return JsonResponse({"error": "Не выбран способ голосования"}, status=400)
 
-    mark_voted([person.tab_number], voted=voted)
+    mark_voted([employee.tab_number], voted=voted)
 
     return JsonResponse(_counts(_filtered(data.get("filters") or {})))
 
@@ -673,12 +676,6 @@ def api_voted(request: HttpRequest) -> JsonResponse:
 def api_bulk_voted(request: HttpRequest) -> JsonResponse:
     """
     API: массовая отметка явки по текущим фильтрам.
-
-    Аргументы:
-        request: POST запрос с JSON {voted, filters}
-
-    Возвращает:
-        JSON со статистикой и количеством измененных/пропущенных или ошибкой
     """
     if not can_edit(request.user):
         return JsonResponse({"error": "нет прав"}, status=403)
@@ -693,7 +690,7 @@ def api_bulk_voted(request: HttpRequest) -> JsonResponse:
 
     skipped = 0
     if voted:
-        # Пропускаем сотрудников без выбранного способа
+        # Пропускаем сотрудников без выбранного способа, чтобы не сломать логику.
         skipped = target.filter(method="").count()
         target = target.exclude(method="")
 
@@ -709,12 +706,6 @@ def api_bulk_voted(request: HttpRequest) -> JsonResponse:
 def api_uik_stats(request: HttpRequest) -> JsonResponse:
     """
     API: статистика по УИКам для модального окна.
-
-    Аргументы:
-        request: GET запрос с параметрами фильтрации
-
-    Возвращает:
-        JSON с массивом статистики по каждому УИК
     """
     rows = (
         _filtered(request.GET)
@@ -727,6 +718,40 @@ def api_uik_stats(request: HttpRequest) -> JsonResponse:
     )
 
 
+@login_required
+@require_POST
+def api_toggle_absence(request: HttpRequest, employee_id: int) -> JsonResponse:
+    """
+    API: переключение отметки «Отсутствие по УП» (уважительная причина).
+
+    Описание:
+        Инвертирует текущее булево значение поля absence у конкретного сотрудника.
+        Используется для кнопки на странице «Способ голосования», которая должна
+        срабатывать без перезагрузки страницы.
+
+    Аргументы:
+        request: HTTP-запрос.
+        employee_id: уникальный идентификатор сотрудника из URL.
+
+    Возвращает:
+        JsonResponse с ID сотрудника и новым статусом отсутствия.
+    """
+    # Проверка прав: только пользователи с правами редактирования могут менять отметки.
+    if not can_edit(request.user):
+        return JsonResponse({"error": "нет прав"}, status=403)
+
+    # Ищем сотрудника. Если ID не существует, Django автоматически вернет 404.
+    employee = get_object_or_404(Employee.objects, id=employee_id)
+
+    # Инвертируем флаг (True -> False, False -> True).
+    employee.absence = not employee.absence
+
+    # Сохраняем только измененное поле, чтобы не делать лишних записей в БД.
+    employee.save(update_fields=["absence"])
+
+    return JsonResponse({"id": employee.id, "absence": employee.absence})
+
+
 # ==============================================================================
 # Экспорт отчетов (Standard)
 # ==============================================================================
@@ -734,56 +759,31 @@ def api_uik_stats(request: HttpRequest) -> JsonResponse:
 
 @login_required
 def export_summary(request: HttpRequest) -> HttpResponse:
-    """
-    Экспорт сводной таблицы по цехам.
-
-    Возвращает:
-        HttpResponse с Excel-файлом
-    """
+    """Экспорт сводной таблицы по цехам."""
     return _make_excel_response(summary_table(), "svodka_po_ceham")
 
 
 @login_required
 def export_summary_no_19(request: HttpRequest) -> HttpResponse:
-    """
-    Экспорт сводной таблицы по цехам без учета 19 округа.
-
-    Возвращает:
-        HttpResponse с Excel-файлом
-    """
+    """Экспорт сводной таблицы по цехам без учета 19 округа."""
     return _make_excel_response(summary_table_no_u19(), "svodka_po_ceham_bez_u19")
 
 
 @login_required
 def export_productions(request: HttpRequest) -> HttpResponse:
-    """
-    Экспорт таблицы по производствам.
-
-    Возвращает:
-        HttpResponse с Excel-файлом
-    """
+    """Экспорт таблицы по производствам."""
     return _make_excel_response(production_table(), "po_proizvodstvam")
 
 
 @login_required
 def export_production_methods(request: HttpRequest) -> HttpResponse:
-    """
-    Экспорт таблицы способов голосования по производствам.
-
-    Возвращает:
-        HttpResponse с Excel-файлом
-    """
+    """Экспорт таблицы способов голосования по производствам."""
     return _make_excel_response(production_method_table(), "sposoby_po_proizvodstvam")
 
 
 @login_required
 def export_production_methods_no_19(request: HttpRequest) -> HttpResponse:
-    """
-    Экспорт таблицы способов голосования по производствам без 19 округа.
-
-    Возвращает:
-        HttpResponse с Excel-файлом
-    """
+    """Экспорт таблицы способов голосования по производствам без 19 округа."""
     return _make_excel_response(
         production_method_table(exclude_u19=True), "sposoby_po_proizvodstvam_bez_u19"
     )
@@ -791,26 +791,13 @@ def export_production_methods_no_19(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def export_employees(request: HttpRequest) -> HttpResponse:
-    """
-    Экспорт полной таблицы сотрудников.
-
-    Возвращает:
-        HttpResponse с Excel-файлом
-    """
+    """Экспорт полной таблицы сотрудников."""
     return _make_excel_response(export_xlsx(), "employees")
 
 
 def _archive_response(request: HttpRequest, mode: str, prefix: str) -> HttpResponse:
     """
-    Хелпер для генерации ZIP-архивов с отчетами по цехам.
-
-    Аргументы:
-        request: HTTP запрос
-        mode: режим отчета ("turnout" или "method")
-        prefix: префикс имени файла
-
-    Возвращает:
-        HttpResponse с ZIP-файлом или редирект с ошибкой
+    Внутренний хелпер для генерации ZIP-архивов с отчетами по цехам.
     """
     moment = timezone.localtime()
     archiver = reports_archive(moment, mode)
@@ -828,23 +815,13 @@ def _archive_response(request: HttpRequest, mode: str, prefix: str) -> HttpRespo
 
 @login_required
 def export_archive(request: HttpRequest) -> HttpResponse:
-    """
-    Экспорт архива отчетов по явке.
-
-    Возвращает:
-        HttpResponse с ZIP-файлом
-    """
+    """Экспорт архива отчетов по явке."""
     return _archive_response(request, "turnout", "yavka")
 
 
 @login_required
 def export_custom_archive(request: HttpRequest) -> HttpResponse:
-    """
-    Экспорт кастомного архива отчетов по цехам.
-
-    Возвращает:
-        HttpResponse с ZIP-файлом или редирект с ошибкой
-    """
+    """Экспорт кастомного архива отчетов по цехам."""
     moment = timezone.localtime()
     archiver = custom_reports_archive(request.GET, moment)
 
@@ -861,26 +838,13 @@ def export_custom_archive(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def export_method_archive(request: HttpRequest) -> HttpResponse:
-    """
-    Экспорт архива отчетов по способам голосования.
-
-    Возвращает:
-        HttpResponse с ZIP-файлом
-    """
+    """Экспорт архива отчетов по способам голосования."""
     return _archive_response(request, "method", "sposob")
 
 
 @login_required
 def export_custom_report(request: HttpRequest) -> HttpResponse:
-    """
-    Экспорт кастомного отчета (по людям или по производствам).
-
-    Аргументы:
-        request: GET запрос с параметром grouping
-
-    Возвращает:
-        HttpResponse с Excel-файлом
-    """
+    """Экспорт кастомного отчета (по людям или по производствам)."""
     grouping = request.GET.get("grouping", "people")
     moment_str = timezone.localtime().strftime("%Y%m%d_%H%M")
 
@@ -910,13 +874,7 @@ def export_custom_report(request: HttpRequest) -> HttpResponse:
 
 def login_view(request: HttpRequest) -> HttpResponse:
     """
-    Страница входа в систему.
-
-    Аргументы:
-        request: HTTP запрос
-
-    Возвращает:
-        HttpResponse с формой входа или редирект для авторизованных
+    Страница входа в систему (форма логина и пароля).
     """
     if request.user.is_authenticated:
         return redirect("method")
@@ -939,23 +897,7 @@ def login_view(request: HttpRequest) -> HttpResponse:
 @login_required
 def logout_view(request: HttpRequest) -> HttpResponse:
     """
-    Выход из системы.
-
-    Аргументы:
-        request: HTTP запрос
-
-    Возвращает:
-        Редирект на страницу входа
+    Завершение сеанса пользователя и выход из системы.
     """
     logout(request)
     return redirect("login")
-
-
-@require_POST
-def toggle_absence(request, employee_id):
-    employee = get_object_or_404(Employee.all_employees, id=employee_id)
-
-    employee.absence = not employee.absence
-    employee.save()
-
-    return redirect("method_page")
