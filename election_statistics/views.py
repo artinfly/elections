@@ -348,7 +348,7 @@ def _counts(qs: Optional[QuerySet] = None) -> dict[str, Any]:
         plan_uik=Count("id", filter=Q(method=UIK)),
         plan_uvz=Count("id", filter=Q(method=UVZ)),
         plan_u19=Count("id", filter=Q(method=UIK19)),
-        plan_none=Count("id", filter=Q(method="")),
+        plan_none=Count("id", filter=Q(method="", absence=False)),
         plan_total=Count("id"),
         # Фактическая явка (только те, у кого voted=True).
         voted_deg=Count("id", filter=Q(voted=True, voted_method=DEG)),

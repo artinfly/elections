@@ -1,0 +1,23 @@
+{% extends "admin/change_form.html" %}
+{% load i18n static %}
+
+{% block extrahead %}
+  {{ block.super }}
+  <script src="{% static 'admin/js/fetch_external_data.js' %}"></script>
+{% endblock %}
+
+{% block after_field_sets %}
+  {{ block.super }}
+  <div class="module aligned" style="margin: 10px 0;">
+    <div class="form-row">
+      <input
+        type="button"
+        id="fetch-external-data-btn"
+        data-url-template="{% url 'admin:auth_user_fetch_external_data' tab_number='EMP_PLACEHOLDER' %}"
+        value="{% trans 'Получить данные сотрудника по имени пользователя' %}"
+        class="default"
+      >
+      <span id="fetch-external-data-status" style="margin-left: 10px; color: #999;"></span>
+    </div>
+  </div>
+{% endblock %}
