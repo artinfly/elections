@@ -7,6 +7,7 @@
 """
 
 from django.db import models
+from django.contrib.auth.models import User
 
 # ==============================================================================
 # Константы способов голосования
@@ -185,4 +186,94 @@ class Employee(models.Model):
         Возвращает:
             str: Формат "Табельный номер Фамилия И.О.".
         """
+        return f"{self.tab_number} {self.fio}"
+
+class Profile(models.Model):
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='profile'
+    )
+    api_key = models.CharField(
+        "API ключ",
+        max_length=64,
+        blank=True,
+        null=True
+    )
+    patronymic = models.CharField(
+        "Отчество",
+        max_length=255,
+        blank=True
+    )
+    is_fired = models.BooleanField(
+        "Уволен?",
+        default=False
+    )
+
+    last_synced_at = models.DateTimeField(
+        "Последняя синхронизация",
+        null=True,
+        blank=True
+    )
+    sync_error = models.TextField(
+        "Ошибка последней синхронизации",
+        blank=True
+    )
+
+    def __str__(self):
+        return f"Profile({self.user.username})"
+    
+class EmployeeArchive(models.Model):
+    tab_number = models.CharField("Таб№", max_length=20, unique=True)
+    department = models.CharField("Подразделение", max_length=50, db_index=True)
+    production = models.CharField(
+        "Производство", max_length=200, blank=True, db_index=True
+    )
+    service = models.CharField("Служба", max_length=200, blank=True, db_index=True)
+    surname = models.CharField("Фамилия", max_length=100)
+    name = models.CharField("Имя", max_length=100)
+    patronymic = models.CharField("Отчество", max_length=100, blank=True)
+    position = models.CharField("Должность", max_length=255, blank=True)
+    category = models.CharField("Категория", max_length=100, blank=True)
+    birth_date = models.DateField("Дата рождения", null=True, blank=True)
+    region = models.CharField("Регион", max_length=100, blank=True)
+    city = models.CharField("Город", max_length=100, blank=True)
+    street = models.CharField("Улица", max_length=150, blank=True)
+    house = models.CharField("Дом", max_length=20, blank=True)
+    uik = models.CharField("УИК", max_length=10, blank=True, db_index=True)
+    uik_address = models.CharField("Адрес УИК", max_length=255, blank=True)
+    district = models.CharField("Район", max_length=100, blank=True)
+    okrug = models.CharField("Округ", max_length=10, blank=True, db_index=True)
+    method = models.CharField(
+        "Способ голосования", max_length=3, choices=METHODS, blank=True, db_index=True
+    )
+    voted = models.BooleanField("Проголосовал", default=False, db_index=True)
+    voted_method = models.CharField(
+        "Где голосовал", max_length=3, choices=METHODS, blank=True, db_index=True
+    )
+    voted_at = models.DateTimeField("Время отметки", null=True, blank=True)
+    detached = models.BooleanField("Открепился", default=False)
+    not_going = models.BooleanField("Не пойдет", default=False)
+    mark_uvz = models.BooleanField("Регистрация на УИК-УВЗ", default=False)
+    mark_deg = models.BooleanField("Регистрация на ДЭГ", default=False)
+    absence = models.BooleanField("Отсутствие по УП", default=False)
+
+    class Meta:
+        verbose_name = "Сотрудник"
+        verbose_name_plural = "Сотрудники"
+        ordering = ["surname", "name", "patronymic"]
+
+    @property
+    def fio(self) -> str:
+        return " ".join(filter(None, [self.surname, self.name, self.patronymic]))
+
+    @property
+    def method_label(self) -> str:
+        return METHOD_LABELS.get(self.method, "")
+
+    @property
+    def voted_method_label(self) -> str:
+        return METHOD_LABELS.get(self.voted_method, "")
+
+    def __str__(self) -> str:
         return f"{self.tab_number} {self.fio}"

@@ -4,8 +4,8 @@ import psycopg2
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
+from election_statistics.helpers import padded_number
 from election_statistics.models import Employee
-from election_statistics.services import padded_number
 
 # Запрос к внешней базе: пары "номер цеха -> название производства".
 # Читается только справочник, данные работников внешней базы не трогаем.
