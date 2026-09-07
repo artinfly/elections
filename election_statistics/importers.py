@@ -366,8 +366,8 @@ def import_turnout(upload: Any) -> tuple[int, int, int]:
     with _sheet(upload) as rows:
         all_rows = list(rows)
 
-#     if not all_rows:
-#         raise ValueError("Ошибка: файл пустой")
+    if not all_rows:
+        raise ValueError("Ошибка: файл пустой")
 
     # Проверяем заголовок в первой ячейке первой строки.
     header = str(all_rows[0][0] or "").strip().lower()
