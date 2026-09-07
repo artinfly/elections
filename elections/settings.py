@@ -188,3 +188,5 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024
 
 # Тип автоинкрементного первичного ключа по умолчанию для всех моделей.
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+HR_SERVICE_API_URL = "http://localhost:8001/api/"
