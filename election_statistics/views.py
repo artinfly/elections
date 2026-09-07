@@ -8,6 +8,7 @@
 """
 
 import json
+from datetime import date, datetime, time
 from typing import Any, Optional
 
 from django.contrib.auth import authenticate, login, logout
@@ -21,7 +22,13 @@ from django.views.decorators.http import require_POST
 
 from .custom_reports import custom_production_summary, custom_report
 from .helpers import COLUMNS
-from .importers import import_base, import_voting_choices, mark_voted, set_turnout
+from .importers import (
+    import_base,
+    import_turnout_hq,
+    import_voting_choices,
+    mark_voted,
+    set_turnout,
+)
 from .models import DEG, METHOD_LABELS, METHODS, UIK, UIK19, UVZ, Employee
 from .reports import (
     custom_reports_archive,
@@ -574,6 +581,36 @@ def upload_voting_choices(request: HttpRequest) -> HttpResponse:
         )
     except ValueError as exc:
         request.session["msg"] = str(exc)
+    return redirect("upload")
+
+
+@login_required
+@require_POST
+def upload_turnout_hq(request: HttpRequest) -> HttpResponse:
+    """
+    Обработчик формы загрузки отметок явки из файла штаба (с датой и временем).
+    """
+    if not is_operator(request.user):
+        return JsonResponse({"error": "нет прав"}, status=403)
+
+    upload = request.FILES.get("file")
+    try:
+        _validate_excel_file(upload)
+    except ValueError as exc:
+        request.session["msg"] = str(exc)
+        return redirect("upload")
+
+    try:
+        changed, total, errors = import_turnout_hq(upload)
+        request.session["msg"] = (
+            f"Обработано строк: {total}. Отмечено явок: {changed}, "
+            f"ошибок/пропусков (нет в базе или не выбран способ): {errors}"
+        )
+    except ValueError as exc:
+        request.session["msg"] = str(exc)
+    except Exception as exc:
+        request.session["msg"] = f"Неожиданная ошибка: {str(exc)}"
+
     return redirect("upload")
 
 

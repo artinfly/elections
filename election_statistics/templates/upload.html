@@ -8,7 +8,7 @@
     <span class="row-count-label">в базе работников: {{ counts.method.total }}</span>
 </div>
 
-{# Сообщение об итогах предыдущей загрузки (универсальное для обоих типов) #}
+{# Сообщение об итогах предыдущей загрузки (универсальное для всех типов) #}
 {% if msg %}
     <div class="ok-msg mb-3">{{ msg }}</div>
 {% endif %}
@@ -87,7 +87,46 @@
                     <li>Система ищет колонки: <b>Таб.№</b>, <b>ФИО</b> и 4 колонки способов голосования.</li>
                     <li>Если в колонке способа стоит цифра <b>«1»</b>, этот способ назначается сотруднику.</li>
                     <li>Обновляется <b>только</b> поле «Способ голосования». Остальные данные (адрес, УИК и т.д.) не меняются.</li>
-                    <li>Если сотрудник с таким Таб.№ не найден, он будет создан с минимальными данными (ФИО и способ).</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    {# ========================================================================= #}
+    {# БЛОК 3: Загрузка отметок явки из файла штаба (с датой и временем) #}
+    {# ========================================================================= #}
+    <div class="col-md-12 mt-2">
+        <div class="card-block h-100">
+            <div class="block-title mb-3">3. Загрузка отметок явки из файла штаба (с датой и временем)</div>
+            
+            <form method="post" action="{% url 'upload_turnout_hq' %}" enctype="multipart/form-data"
+                  onsubmit="return checkFile('file-turnout', 'btn-turnout', 'error-turnout', 'progress-turnout')">
+                {% csrf_token %}
+                <div class="file-row mb-2">
+                    <input type="file" name="file" id="file-turnout" accept=".xlsx" class="form-control form-control-sm">
+                    <button class="btn-orange ms-2" type="submit" id="btn-turnout">Загрузить</button>
+                </div>
+                
+                <div class="fmt-line mb-2">
+                    <span class="fmt-badge">XLSX</span>
+                    <span>Формат: выгрузка из системы штаба с фиксацией времени голосования.</span>
+                </div>
+                
+                <div id="progress-turnout" class="hint text-primary" style="display:none">
+                    Идёт разбор файла и простановка явки, подождите...
+                </div>
+                <div id="error-turnout" class="err-msg mt-2" style="display:none"></div>
+            </form>
+
+            <hr class="my-3">
+            
+            <div class="block-title" style="font-size: 0.9em;">Требования к файлу:</div>
+            <div class="hint" style="font-size: 0.85em;">
+                <ul class="mb-0 ps-3">
+                    <li><b>1-я колонка (A):</b> Табельный номер</li>
+                    <li><b>4-я колонка (D):</b> Дата голосования</li>
+                    <li><b>5-я колонка (E):</b> Время голосования</li>
+                    <li class="text-danger"><b>Важно:</b> Явка проставляется <u>только</u> тем сотрудникам, которым ранее был назначен способ голосования. Строки без назначенного способа будут пропущены и учтены в графе «ошибки/пропуски».</li>
                 </ul>
             </div>
         </div>

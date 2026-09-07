@@ -3,12 +3,10 @@
 
 Описание:
     Содержит логику чтения выгрузок из Excel и записи данных в базу.
-    Поддерживает три сценария:
-    1. Импорт основной базы сотрудников (ФИО, адреса, участки).
-    2. Импорт отчета штаба с выбранными способами голосования.
-    3. Массовая простановка явки (из списка табельных номеров).
+    Поддерживает сценарии импорта базы, отчётов штаба и массовую простановку явки.
 """
 
+from datetime import date, datetime, time
 from typing import Any, Iterator
 
 from django.db.models import F
@@ -23,21 +21,6 @@ from .models import Employee
 
 
 def _rows_by_tab(rows: Iterator, positions: dict) -> dict:
-    """
-    Разбирает строки файла в словарь по табельному номеру.
-
-    Описание:
-        Проходит по строкам листа и собирает данные в словарь, где ключом
-        является табельный номер. Если в файле есть дубликаты строк,
-        последняя запись перезаписывает предыдущие.
-
-    Аргументы:
-        rows: итератор строк листа.
-        positions: словарь {имя_колонки: индекс} из функции _header.
-
-    Возвращает:
-        dict: {табельный_номер: {поле: значение, ...}}.
-    """
     parsed = {}
     for row in rows:
         if not any(row):
@@ -46,33 +29,17 @@ def _rows_by_tab(rows: Iterator, positions: dict) -> dict:
         for name, index in positions.items():
             field = COLUMNS[name]
             cell = row[index] if index < len(row) else None
-            # Даты парсим отдельно, остальные поля приводим к строке.
             values[field] = _date(cell) if field == "birth_date" else _text(cell)
 
         tab = values.pop("tab_number")
-        # Приводим числовые табельные номера к единому формату (дополняем нулями).
-        if tab.isdigit():
-            tab = tab.zfill(7)
+        if tab and str(tab).isdigit():
+            tab = str(tab).zfill(7)
         if tab:
             parsed[tab] = values
     return parsed
 
 
 def _known_rows(tabs: list, fields: list) -> dict:
-    """
-    Подтягивает существующих сотрудников из БД чанками.
-
-    Описание:
-        Чтобы не загружать всю таблицу сотрудников в оперативную память,
-        запрос к базе разбивается на пакеты по 2000 табельных номеров.
-
-    Аргументы:
-        tabs: список табельных номеров из загружаемого файла.
-        fields: список полей, которые нужно достать для сравнения.
-
-    Возвращает:
-        dict: {табельный_номер: {"pk": ID, поля...}}.
-    """
     known = {}
     tabs = list(tabs)
     for start in range(0, len(tabs), 2000):
@@ -85,23 +52,6 @@ def _known_rows(tabs: list, fields: list) -> dict:
 
 
 def import_base(upload: Any) -> tuple[int, int, int]:
-    """
-    Импорт основной базы сотрудников из кадровой выгрузки.
-
-    Описание:
-        Создает новые записи и обновляет изменившиеся данные у существующих.
-        Важная особенность: поля, связанные с голосованием (способ, явка, производство),
-        НЕ стираются при повторной загрузке, так как их нет в исходном файле.
-
-    Аргументы:
-        upload: файл или поток с xlsx.
-
-    Возвращает:
-        tuple: (создано, обновлено, всего строк).
-
-    Исключения:
-        ValueError: битый файл или не найдена обязательная колонка "Таб№".
-    """
     with _sheet(upload) as rows:
         positions = _header(rows, COLUMNS)
         if "Таб№" not in positions:
@@ -111,7 +61,6 @@ def import_base(upload: Any) -> tuple[int, int, int]:
     if not parsed:
         return 0, 0, 0
 
-    # Список полей для проверки изменений (все, кроме табельного номера).
     fields = [COLUMNS[name] for name in positions if COLUMNS[name] != "tab_number"]
     known = _known_rows(parsed, fields)
 
@@ -119,13 +68,10 @@ def import_base(upload: Any) -> tuple[int, int, int]:
     for tab, values in parsed.items():
         current = known.get(tab)
         if current is None:
-            # Сотрудника нет в базе — готовим к созданию.
             fresh.append(Employee(tab_number=tab, **values))
         elif any(current[field] != values[field] for field in fields):
-            # Данные изменились — готовим к обновлению (используем существующий PK).
             stale.append(Employee(pk=current["pk"], tab_number=tab, **values))
 
-    # Пакетные операции для минимизации нагрузки на БД.
     if fresh:
         Employee.objects.bulk_create(fresh, batch_size=BATCH)
     if stale:
@@ -135,26 +81,11 @@ def import_base(upload: Any) -> tuple[int, int, int]:
 
 
 # ==============================================================================
-# Отметки явки
+# Отметки явки (базовые)
 # ==============================================================================
 
 
 def set_turnout(queryset: Any, voted: bool = True) -> int:
-    """
-    Массово проставляет явку одним UPDATE-запросом.
-
-    Описание:
-        При отметке явки место голосования (voted_method) автоматически копируется
-        из плана (method). При снятии отметки поле voted_method очищается.
-        Сам план (method) не изменяется.
-
-    Аргументы:
-        queryset: QuerySet сотрудников для отметки.
-        voted: True — отметить явку, False — снять.
-
-    Возвращает:
-        int: число изменённых строк.
-    """
     return queryset.update(
         voted=voted,
         voted_at=timezone.now() if voted else None,
@@ -163,29 +94,22 @@ def set_turnout(queryset: Any, voted: bool = True) -> int:
 
 
 def mark_voted(tabs: list, voted: bool = True) -> tuple[int, int]:
-    """
-    Отмечает явку по списку табельных номеров (используется API).
-
-    Аргументы:
-        tabs: список табельных номеров.
-        voted: True — отметить, False — снять.
-
-    Возвращает:
-        tuple: (изменено, не найдено в базе).
-    """
-    tabs = {t for t in tabs if t}
+    tabs = {str(t) for t in tabs if t}
     if not tabs:
         return 0, 0
-    found = Employee.objects.filter(tab_number__in=tabs)
-    missing = len(tabs) - found.count()
+
+    # Приводим к формату с нулями, если это цифры
+    formatted_tabs = {t.zfill(7) if t.isdigit() else t for t in tabs}
+
+    found = Employee.objects.filter(tab_number__in=formatted_tabs)
+    missing = len(formatted_tabs) - found.count()
     return set_turnout(found, voted), missing
 
 
 # ==============================================================================
-# Импорт отчётов штаба (Способы голосования и Явка)
+# Импорт отчётов штаба (Способы голосования)
 # ==============================================================================
 
-# Маркеры колонок отчёта штаба: способ голосования определяется отметкой "1"
 NEW_FORMAT_COLUMNS = {
     "Таб.№": "tab_number",
     "ФИО": "fio_raw",
@@ -197,35 +121,12 @@ NEW_FORMAT_COLUMNS = {
 
 
 def import_voting_choices(upload: Any) -> tuple[int, int, int]:
-    """
-    Импорт способов голосования из отчёта штаба.
-
-    Описание:
-        Читает файл, где способы голосования отмечены единицами ("1") в соответствующих
-        колонках. Обновляет поле method у существующих сотрудников.
-        Сотрудники, которых нет в базе, НЕ создаются: без department, okrug и uik
-        они сломали бы отчёты по цехам и округам — такая строка считается ошибкой.
-
-    Оптимизация:
-        Для избежания N+1 запросов все табельные номера сначала парсятся из файла,
-        затем одним запросом извлекаются из БД, и обновление происходит пакетно (bulk_update).
-
-    Аргументы:
-        upload: файл или поток с xlsx.
-
-    Возвращает:
-        tuple: (обновлено, всего строк, ошибок/пропусков).
-
-    Исключения:
-        ValueError: битый или пустой файл, не найдены обязательные колонки.
-    """
     with _sheet(upload) as rows:
         all_rows = list(rows)
 
     if not all_rows:
         raise ValueError("Ошибка: файл пустой")
 
-    # Поиск строки заголовка (регистр и точное положение не важны).
     header_row_idx = 0
     for idx, row in enumerate(all_rows):
         cells = [str(cell or "").strip() for cell in row if cell is not None]
@@ -236,7 +137,6 @@ def import_voting_choices(upload: Any) -> tuple[int, int, int]:
     if header_row_idx >= len(all_rows) - 1:
         raise ValueError("Ошибка: не найдена строка с данными")
 
-    # Сопоставление колонок.
     header_row = all_rows[header_row_idx]
     col_indices = {}
     for idx, cell in enumerate(header_row):
@@ -263,8 +163,7 @@ def import_voting_choices(upload: Any) -> tuple[int, int, int]:
     if not any(method_cols.values()):
         raise ValueError("Ошибка: не найдены колонки способов голосования")
 
-    # --- Этап 1: Парсинг файла в память ---
-    file_data = {}  # {табельный_номер: выбранный_способ}
+    file_data = {}
     total = 0
     parse_errors = 0
 
@@ -280,11 +179,9 @@ def import_voting_choices(upload: Any) -> tuple[int, int, int]:
             if not tab_number:
                 continue
 
-            # ИСПРАВЛЕНО: добавлены скобки .isdigit(), иначе zfill ломал буквенные табельные.
             if tab_number.isdigit():
                 tab_number = tab_number.zfill(7)
 
-            # Способ определяется отметкой "1". Две единицы в строке — ошибка формата.
             selected_method = ""
             for method_code, col_idx in method_cols.items():
                 if col_idx is not None and col_idx < len(row):
@@ -296,7 +193,6 @@ def import_voting_choices(upload: Any) -> tuple[int, int, int]:
                         selected_method = method_code
 
             if not selected_method:
-                # Строки без способа учитываются в общем количестве, но не в ошибках.
                 continue
 
             file_data[tab_number] = selected_method
@@ -308,8 +204,6 @@ def import_voting_choices(upload: Any) -> tuple[int, int, int]:
     if not file_data:
         return 0, total, parse_errors
 
-    # --- Этап 2: Запрос к БД и подготовка к обновлению ---
-    # Достаем всех существующих сотрудников одним запросом.
     existing_employees = {
         emp.tab_number: emp
         for emp in Employee.objects.filter(tab_number__in=file_data.keys())
@@ -321,16 +215,13 @@ def import_voting_choices(upload: Any) -> tuple[int, int, int]:
     for tab_number, selected_method in file_data.items():
         employee = existing_employees.get(tab_number)
         if employee is None:
-            # Не создаём "обрывков" без цеха и округа.
             not_found_errors += 1
             continue
 
-        # Обновляем только если способ действительно изменился.
         if employee.method != selected_method:
             employee.method = selected_method
             employees_to_update.append(employee)
 
-    # --- Этап 3: Пакетное сохранение ---
     if employees_to_update:
         Employee.objects.bulk_update(
             employees_to_update, fields=["method"], batch_size=BATCH
@@ -342,26 +233,97 @@ def import_voting_choices(upload: Any) -> tuple[int, int, int]:
     return updated, total, errors
 
 
+# ==============================================================================
+# Импорт явки из списка табельных номеров (простой)
+# ==============================================================================
+
+
 def import_turnout(upload: Any) -> tuple[int, int, int]:
+    with _sheet(upload) as rows:
+        all_rows = list(rows)
+
+    if not all_rows:
+        raise ValueError("Ошибка: файл пустой")
+
+    header = str(all_rows[0][0] or "").strip().lower()
+    if "табель" not in header and "таб" not in header:
+        raise ValueError("Ошибка: в А1 ожидается заголовок 'Табельный'")
+
+    tabs = []
+    for row in all_rows[1:]:
+        if not row:
+            continue
+        tab = _text(row[0])
+        if tab and str(tab).isdigit():
+            tabs.append(str(tab).zfill(7))
+
+    if not tabs:
+        return 0, 0, 0
+
+    total_rows = len(tabs)
+    found = Employee.objects.filter(tab_number__in=tabs)
+    missing_in_db = total_rows - found.count()
+
+    valid_found = found.exclude(method="")
+    skipped_no_method = found.filter(method="").count()
+
+    changed = set_turnout(valid_found, voted=True)
+    errors = missing_in_db + skipped_no_method
+
+    return changed, total_rows, errors
+
+
+# ==============================================================================
+# Импорт явки из отчёта штаба (с датой и временем) - НОВОЕ
+# ==============================================================================
+
+
+def _combine_datetime(date_val: Any, time_val: Any) -> datetime:
+    """Объединяет дату и время из ячеек Excel в timezone-aware datetime."""
+    if not date_val and not time_val:
+        return timezone.now()
+
+    if isinstance(date_val, datetime) and isinstance(time_val, time):
+        dt = datetime.combine(date_val.date(), time_val)
+    elif isinstance(date_val, date) and isinstance(time_val, time):
+        dt = datetime.combine(date_val, time_val)
+    elif isinstance(date_val, datetime) and not time_val:
+        dt = date_val
+    else:
+        d_str = str(date_val).strip() if date_val else ""
+        t_str = str(time_val).strip() if time_val else ""
+        combined_str = f"{d_str} {t_str}".strip()
+
+        formats = [
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%d.%m.%Y %H:%M:%S",
+            "%d.%m.%Y %H:%M",
+            "%d.%m.%y %H:%M:%S",
+            "%d.%m.%y %H:%M",
+        ]
+        dt = None
+        for fmt in formats:
+            try:
+                dt = datetime.strptime(combined_str, fmt)
+                break
+            except ValueError:
+                continue
+
+        if not dt:
+            return timezone.now()
+
+    if timezone.is_naive(dt):
+        dt = timezone.make_aware(dt)
+    return dt
+
+
+def import_turnout_hq(upload: Any) -> tuple[int, int, int]:
     """
-    Импорт отметок явки из файла штаба.
-
-    Описание:
-        Ожидает файл, где в первой строке (ячейка A1) находится заголовок,
-        содержащий слово "Табельный" или "Таб", а в последующих строках
-        в первом столбце указаны табельные номера проголосовавших сотрудников.
-        Проставляет явку (voted=True) и время отметки.
-        Сотрудники без заранее выбранного способа голосования пропускаются,
-        чтобы не нарушать бизнес-логику (нельзя проголосовать, не выбрав способ).
-
-    Аргументы:
-        upload: файл или поток с xlsx.
-
-    Возвращает:
-        tuple: (количество отмеченных, всего строк в файле, количество ошибок/пропусков).
-
-    Исключения:
-        ValueError: если файл пустой или отсутствует ожидаемый заголовок.
+    Импорт отметок явки из файла штаба с датой и временем.
+    1 колонка (индекс 0): табельный номер
+    4 колонка (индекс 3): дата
+    5 колонка (индекс 4): время
     """
     with _sheet(upload) as rows:
         all_rows = list(rows)
@@ -369,37 +331,74 @@ def import_turnout(upload: Any) -> tuple[int, int, int]:
     if not all_rows:
         raise ValueError("Ошибка: файл пустой")
 
-    # Проверяем заголовок в первой ячейке первой строки.
     header = str(all_rows[0][0] or "").strip().lower()
-    if "табель" not in header and "таб" not in header:
-        raise ValueError("Ошибка: в А1 ожидается заголовок 'Табельный'")
+    start_row = (
+        1
+        if (
+            "табель" in header
+            or "таб" in header
+            or not header.replace(".", "").isdigit()
+        )
+        else 0
+    )
 
-    tabs = []
-    for row in all_rows[1:]:  # Пропускаем строку заголовка
-        if not row:
+    tabs_data = {}
+    total_rows = 0
+    parse_errors = 0
+
+    for row in all_rows[start_row:]:
+        if not any(row):
             continue
-        tab = _text(row[0])
-        if tab and tab.isdigit():
-            tabs.append(tab.zfill(7))
 
-    if not tabs:
-        return 0, 0, 0
+        total_rows += 1
 
-    total_rows = len(tabs)
+        try:
+            tab = _text(row[0] if len(row) > 0 else None)
+            if not tab:
+                continue
 
-    # Ищем всех сотрудников из списка в базе.
-    found = Employee.objects.filter(tab_number__in=tabs)
-    missing_in_db = total_rows - found.count()
+            if str(tab).isdigit():
+                tab = str(tab).zfill(7)
+            else:
+                parse_errors += 1
+                continue
 
-    # Фильтруем тех, у кого уже выбран способ голосования.
-    # Бизнес-правило: нельзя отметить явку, если не выбран способ.
+            date_val = row[3] if len(row) > 3 else None
+            time_val = row[4] if len(row) > 4 else None
+
+            dt = _combine_datetime(date_val, time_val)
+            tabs_data[tab] = dt
+
+        except Exception:
+            parse_errors += 1
+            continue
+
+    if not tabs_data:
+        return 0, total_rows, parse_errors
+
+    tabs_list = list(tabs_data.keys())
+
+    found = Employee.objects.filter(tab_number__in=tabs_list)
+    missing_in_db = len(tabs_list) - found.count()
+
     valid_found = found.exclude(method="")
     skipped_no_method = found.filter(method="").count()
 
-    # Массово проставляем явку одним SQL-запросом.
-    changed = set_turnout(valid_found, voted=True)
+    employees_to_update = []
+    for emp in valid_found:
+        emp.voted = True
+        emp.voted_at = tabs_data[emp.tab_number]
+        emp.voted_method = emp.method
+        employees_to_update.append(emp)
 
-    # Ошибками считаем тех, кого нет в базе, и тех, у кого не был выбран способ.
-    errors = missing_in_db + skipped_no_method
+    if employees_to_update:
+        Employee.objects.bulk_update(
+            employees_to_update,
+            fields=["voted", "voted_at", "voted_method"],
+            batch_size=BATCH,
+        )
+
+    changed = len(employees_to_update)
+    errors = missing_in_db + skipped_no_method + parse_errors
 
     return changed, total_rows, errors
