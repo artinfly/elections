@@ -103,13 +103,13 @@
                   onsubmit="return checkFile('file-turnout', 'btn-turnout', 'error-turnout', 'progress-turnout')">
                 {% csrf_token %}
                 <div class="file-row mb-2">
-                    <input type="file" name="file" id="file-turnout" accept=".xlsx" class="form-control form-control-sm">
+                    <input type="file" name="file" id="file-turnout" accept=".zip" class="form-control form-control-sm">
                     <button class="btn-orange ms-2" type="submit" id="btn-turnout">Загрузить</button>
                 </div>
                 
                 <div class="fmt-line mb-2">
-                    <span class="fmt-badge">XLSX</span>
-                    <span>Формат: выгрузка из системы штаба с фиксацией времени голосования.</span>
+                    <span class="fmt-badge">.ZIP</span>
+                    <span>Формат: ZIP-архив, внутри которого лежат файлы .xlsx с отчётом штаба</span>
                 </div>
                 
                 <div id="progress-turnout" class="hint text-primary" style="display:none">
@@ -127,6 +127,46 @@
                     <li><b>4-я колонка (D):</b> Дата голосования</li>
                     <li><b>5-я колонка (E):</b> Время голосования</li>
                     <li class="text-danger"><b>Важно:</b> Явка проставляется <u>только</u> тем сотрудникам, которым ранее был назначен способ голосования. Строки без назначенного способа будут пропущены и учтены в графе «ошибки/пропуски».</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    {# ========================================================================= #}
+    {# БЛОК 4: #}
+    {# ========================================================================= #}
+    <div class="col-md-12 mt-2">
+        <div class="card-block h-100">
+            <div class="block-title mb-3">4. Загрузка сводного отчёта (обновление меток)</div>
+            
+            <form method="post" action="{% url 'upload_custom_report' %}" enctype="multipart/form-data"
+                  onsubmit="return checkFile('file-custom', 'btn-custom', 'error-custom', 'progress-custom')">
+                {% csrf_token %}
+                <div class="file-row mb-2">
+                    <input type="file" name="file" id="file-custom" accept=".zip,.xlsx" class="form-control form-control-sm">
+                    <button class="btn-orange ms-2" type="submit" id="btn-custom">Загрузить</button>
+                </div>
+                
+                <div class="fmt-line mb-2">
+                    <span class="fmt-badge">.ZIP / .XLSX</span>
+                    <span>Формат: архив или файл.</span>
+                </div>
+                
+                <div id="progress-custom" class="hint text-primary" style="display:none">
+                    Идёт разбор файла и обновление меток, подождите...
+                </div>
+                <div id="error-custom" class="err-msg mt-2" style="display:none"></div>
+            </form>
+
+            <hr class="my-3">
+            
+            <div class="block-title" style="font-size: 0.9em;">Что обновляется по знакам "+" :</div>
+            <div class="hint" style="font-size: 0.85em;">
+                <ul class="mb-0 ps-3">
+                    <li><b>Планирует:</b> обновляет способ голосования</li>
+                    <li><b>Проголосовал:</b> ставит явку  и место явки</li>
+                    <li><b>Зарегестрирован:</b> Зарегестрирован / Заявление оформлено</li>
+                    <li><b>Открепился:</b> ставит метку detached</li>
+                    <li><b>Уважительная причина:</b> ставит метку absence</li>
                 </ul>
             </div>
         </div>
@@ -155,14 +195,46 @@ function checkFile(inputId, btnId, errorId, progressId) {
 
     // Файл не выбран
     if (!input.files || !input.files.length) {
-        return fail('Файл не прикреплён — выберите .xlsx перед загрузкой');
+        return fail('Файл не прикреплён — выберите .zip перед загрузкой');
     }
 
     // Проверка расширения
     var name = input.files[0].name;
-    if (!name.toLowerCase().endsWith('.xlsx')) {
+    if (!name.toLowerCase().endsWith('.zip')) {
         var ext = name.indexOf('.') >= 0 ? name.slice(name.lastIndexOf('.')) : 'без расширения';
-        return fail('Это ' + ext + ', а нужен .xlsx — пересохраните файл в Excel');
+        return fail('Это ' + ext + ', а нужен .zip архив.');
+    }
+
+    // Всё в порядке: скрываем ошибку, блокируем кнопку, показываем прогресс
+    err.style.display = 'none';
+    var btn = document.getElementById(btnId);
+    btn.disabled = true;
+    btn.textContent = 'Обработка...';
+    document.getElementById(progressId).style.display = 'block';
+    
+    return true; // Разрешаем отправку формы
+
+
+function checkFileCustom(inputId, btnId, errorId, progressId) {
+    var input = document.getElementById(inputId);
+    var err = document.getElementById(errorId);
+
+    function fail(text) {
+        err.textContent = text;
+        err.style.display = 'block';
+        return false;
+    }
+
+    // Файл не выбран
+    if (!input.files || !input.files.length) {
+        return fail('Файл не прикреплён — выберите .zip перед загрузкой');
+    }
+
+    // Проверка расширения
+    var name = input.files[0].name.toLowerCase();
+    if (!name.endsWith('.zip') && !name.endsWith('.xlsx')) {
+        var ext = name.indexOf('.') >= 0 ? name.slice(name.lastIndexOf('.')) : 'без расширения';
+        return fail('Нужен формат .zip или .xlsx, а получен' + ext);
     }
 
     // Всё в порядке: скрываем ошибку, блокируем кнопку, показываем прогресс

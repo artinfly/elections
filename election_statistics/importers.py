@@ -3,9 +3,12 @@
 
 Описание:
     Содержит логику чтения выгрузок из Excel и записи данных в базу.
-    Поддерживает сценарии импорта базы, отчётов штаба и массовую простановку явки.
+    Поддерживает сценарии импорта основной базы, отчётов штаба,
+    массовую простановку явки и обработку сводных кастомных отчётов.
 """
 
+import io
+import zipfile
 from datetime import date, datetime, time
 from typing import Any, Iterator
 
@@ -13,7 +16,7 @@ from django.db.models import F
 from django.utils import timezone
 
 from .helpers import BATCH, COLUMNS, _date, _header, _sheet, _text
-from .models import Employee
+from .models import DEG, UIK, UIK19, UVZ, Employee
 
 # ==============================================================================
 # Импорт основной базы
@@ -21,6 +24,10 @@ from .models import Employee
 
 
 def _rows_by_tab(rows: Iterator, positions: dict) -> dict:
+    """
+    Парсит строки Excel-файла в словарь, ключом которого является табельный номер.
+    Преобразует типы данных в соответствии с картой колонок COLUMNS.
+    """
     parsed = {}
     for row in rows:
         if not any(row):
@@ -40,6 +47,10 @@ def _rows_by_tab(rows: Iterator, positions: dict) -> dict:
 
 
 def _known_rows(tabs: list, fields: list) -> dict:
+    """
+    Получает из базы данных существующие записи сотрудников по их табельным номерам.
+    Использует чанки по 2000 записей для оптимизации нагрузки на базу данных.
+    """
     known = {}
     tabs = list(tabs)
     for start in range(0, len(tabs), 2000):
@@ -52,6 +63,10 @@ def _known_rows(tabs: list, fields: list) -> dict:
 
 
 def import_base(upload: Any) -> tuple[int, int, int]:
+    """
+    Импортирует или обновляет основную базу сотрудников из Excel-файла.
+    Возвращает кортеж: (количество созданных, количество обновленных, всего обработано).
+    """
     with _sheet(upload) as rows:
         positions = _header(rows, COLUMNS)
         if "Таб№" not in positions:
@@ -86,6 +101,10 @@ def import_base(upload: Any) -> tuple[int, int, int]:
 
 
 def set_turnout(queryset: Any, voted: bool = True) -> int:
+    """
+    Массовое обновление статуса явки для переданного QuerySet.
+    При отметке явки также фиксируется текущее время и копируется запланированный способ голосования.
+    """
     return queryset.update(
         voted=voted,
         voted_at=timezone.now() if voted else None,
@@ -94,11 +113,14 @@ def set_turnout(queryset: Any, voted: bool = True) -> int:
 
 
 def mark_voted(tabs: list, voted: bool = True) -> tuple[int, int]:
+    """
+    Отмечает явку по списку табельных номеров.
+    Возвращает кортеж: (количество обновленных записей, количество не найденных в базе).
+    """
     tabs = {str(t) for t in tabs if t}
     if not tabs:
         return 0, 0
 
-    # Приводим к формату с нулями, если это цифры
     formatted_tabs = {t.zfill(7) if t.isdigit() else t for t in tabs}
 
     found = Employee.objects.filter(tab_number__in=formatted_tabs)
@@ -121,6 +143,11 @@ NEW_FORMAT_COLUMNS = {
 
 
 def import_voting_choices(upload: Any) -> tuple[int, int, int]:
+    """
+    Импортирует выбранные способы голосования из отчёта штаба.
+    Анализирует структуру файла, находит нужные колонки и обновляет поле method.
+    Возвращает: (обновлено, всего строк, ошибок/пропусков).
+    """
     with _sheet(upload) as rows:
         all_rows = list(rows)
 
@@ -239,6 +266,10 @@ def import_voting_choices(upload: Any) -> tuple[int, int, int]:
 
 
 def import_turnout(upload: Any) -> tuple[int, int, int]:
+    """
+    Импортирует явку из простого списка табельных номеров (одна колонка).
+    Пропускает сотрудников, у которых не выбран способ голосования.
+    """
     with _sheet(upload) as rows:
         all_rows = list(rows)
 
@@ -274,12 +305,15 @@ def import_turnout(upload: Any) -> tuple[int, int, int]:
 
 
 # ==============================================================================
-# Импорт явки из отчёта штаба (с датой и временем) - НОВОЕ
+# Импорт явки из отчёта штаба (с датой и временем)
 # ==============================================================================
 
 
 def _combine_datetime(date_val: Any, time_val: Any) -> datetime:
-    """Объединяет дату и время из ячеек Excel в timezone-aware datetime."""
+    """
+    Объединяет дату и время из ячеек Excel в timezone-aware datetime объект.
+    Поддерживает как нативные типы данных openpyxl, так и строковые представления.
+    """
     if not date_val and not time_val:
         return timezone.now()
 
@@ -287,8 +321,6 @@ def _combine_datetime(date_val: Any, time_val: Any) -> datetime:
         dt = datetime.combine(date_val.date(), time_val)
     elif isinstance(date_val, date) and isinstance(time_val, time):
         dt = datetime.combine(date_val, time_val)
-    elif isinstance(date_val, datetime) and not time_val:
-        dt = date_val
     else:
         d_str = str(date_val).strip() if date_val else ""
         t_str = str(time_val).strip() if time_val else ""
@@ -318,76 +350,69 @@ def _combine_datetime(date_val: Any, time_val: Any) -> datetime:
     return dt
 
 
-def import_turnout_hq(upload: Any) -> tuple[int, int, int]:
+def import_turnout_hq_archive(upload: Any) -> tuple[int, int, int]:
     """
-    Импорт отметок явки из файла штаба с датой и временем.
-    1 колонка (индекс 0): табельный номер
-    4 колонка (индекс 3): дата
-    5 колонка (индекс 4): время
+    Импорт отметок явки из ZIP-архива отчётов штаба с датой и временем.
+    Ожидаемые индексы колонок в строке:
+    0: табельный номер
+    4: дата
+    5: время
     """
-    with _sheet(upload) as rows:
-        all_rows = list(rows)
-
-    if not all_rows:
-        raise ValueError("Ошибка: файл пустой")
-
-    header = str(all_rows[0][0] or "").strip().lower()
-    start_row = (
-        1
-        if (
-            "табель" in header
-            or "таб" in header
-            or not header.replace(".", "").isdigit()
-        )
-        else 0
-    )
-
-    tabs_data = {}
+    total_changed = 0
     total_rows = 0
-    parse_errors = 0
+    total_errors = 0
+    all_tabs_data = {}
 
-    for row in all_rows[start_row:]:
-        if not any(row):
-            continue
+    try:
+        with zipfile.ZipFile(upload, "r") as zip_ref:
+            for file_info in zip_ref.infolist():
+                if file_info.filename.endswith(
+                    ".xlsx"
+                ) and not file_info.filename.startswith("__MACOSX"):
+                    with zip_ref.open(file_info) as excel_file:
+                        file_content = io.BytesIO(zip_ref.read(file_info.filename))
+                        with _sheet(file_content) as rows:
+                            all_rows = list(rows)
 
-        total_rows += 1
+                        if len(all_rows) < 2:
+                            continue
 
-        try:
-            tab = _text(row[0] if len(row) > 0 else None)
-            if not tab:
-                continue
+                        for row in all_rows[1:]:
+                            if not any(row):
+                                continue
+                            total_rows += 1
+                            try:
+                                tab = _text(row[0] if len(row) > 0 else None)
+                                if not tab or not str(tab).isdigit():
+                                    total_errors += 1
+                                    continue
+                                tab = str(tab).zfill(7)
 
-            if str(tab).isdigit():
-                tab = str(tab).zfill(7)
-            else:
-                parse_errors += 1
-                continue
+                                date_val = row[4] if len(row) > 4 else None
+                                time_val = row[5] if len(row) > 5 else None
 
-            date_val = row[3] if len(row) > 3 else None
-            time_val = row[4] if len(row) > 4 else None
+                                all_tabs_data[tab] = _combine_datetime(
+                                    date_val, time_val
+                                )
 
-            dt = _combine_datetime(date_val, time_val)
-            tabs_data[tab] = dt
+                            except Exception:
+                                total_errors += 1
+    except zipfile.BadZipFile:
+        raise ValueError("Ошибка: файл не является корректным ZIP-архивом.")
 
-        except Exception:
-            parse_errors += 1
-            continue
+    if not all_tabs_data:
+        return 0, total_rows, total_errors
 
-    if not tabs_data:
-        return 0, total_rows, parse_errors
-
-    tabs_list = list(tabs_data.keys())
-
+    tabs_list = list(all_tabs_data.keys())
     found = Employee.objects.filter(tab_number__in=tabs_list)
-    missing_in_db = len(tabs_list) - found.count()
 
     valid_found = found.exclude(method="")
-    skipped_no_method = found.filter(method="").count()
+    total_errors += (len(tabs_list) - found.count()) + found.filter(method="").count()
 
     employees_to_update = []
     for emp in valid_found:
         emp.voted = True
-        emp.voted_at = tabs_data[emp.tab_number]
+        emp.voted_at = all_tabs_data[emp.tab_number]
         emp.voted_method = emp.method
         employees_to_update.append(emp)
 
@@ -398,7 +423,210 @@ def import_turnout_hq(upload: Any) -> tuple[int, int, int]:
             batch_size=BATCH,
         )
 
-    changed = len(employees_to_update)
-    errors = missing_in_db + skipped_no_method + parse_errors
+    return len(employees_to_update), total_rows, total_errors
 
-    return changed, total_rows, errors
+
+# ==============================================================================
+# Импорт кастомного сводного отчёта
+# ==============================================================================
+
+
+def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
+    """
+    Импортирует данные из кастомного сводного отчёта (Excel или ZIP с Excel).
+    Распознает сложные заголовки с объединенными ячейками (группа + подгруппа)
+    и обновляет соответствующие поля сотрудника: способ, явку, служебные отметки.
+    """
+    total_changed = 0
+    total_rows = 0
+    total_errors = 0
+
+    def _get_col_indices(header_rows: list) -> dict:
+        """
+        Сопоставляет индексы колонок Excel с внутренними полями модели Employee
+        на основе анализа текста в первой и второй строке заголовка.
+        """
+        indices = {}
+        for c_idx in range(len(header_rows[0])):
+            group = str(header_rows[0][c_idx] or "").strip().lower()
+            sub = str(header_rows[1][c_idx] or "").strip().lower()
+            combined = f"{group}{sub}"
+
+            if "таб.№" in combined or "табельный" in combined:
+                indices["tab"] = c_idx
+            elif "дэг" in group and "планирует" in sub:
+                indices["plan_deg"] = c_idx
+            elif "дэг" in group and (
+                "зарегистрирован" in sub or "зарегестрирован" in sub
+            ):
+                indices["mark_deg"] = c_idx
+            elif "дэг" in group and "проголосовал" in sub:
+                indices["voted_deg"] = c_idx
+            elif "на участке" in group and "увз" not in group and "планирует" in sub:
+                indices["plan_uik"] = c_idx
+            elif "на участке" in group and "увз" not in group and "проголосовал" in sub:
+                indices["voted_uik"] = c_idx
+            elif "увз" in group and "планирует" in sub:
+                indices["plan_uvz"] = c_idx
+            elif "увз" in group and "заявление" in sub:
+                indices["mark_uvz"] = c_idx
+            elif "увз" in group and "проголосовал" in sub:
+                indices["voted_uvz"] = c_idx
+            elif "19" in group and "планирует" in sub:
+                indices["plan_u19"] = c_idx
+            elif "19" in group and "открепился" in sub:
+                indices["mark_u19"] = c_idx
+            elif "19" in group and "проголосовал" in sub:
+                indices["voted_u19"] = c_idx
+            elif "уважительная" in combined or "причина" in combined:
+                indices["absence"] = c_idx
+            elif "открепился" in combined or "откреп" in combined:
+                indices["detached"] = c_idx
+            elif "не пойдет" in combined or "не пойдёт" in combined:
+                indices["not_going"] = c_idx
+
+        return indices
+
+    def _has_mark(row: list, idx: int) -> bool:
+        """
+        Проверяет, содержит ли ячейка по заданному индексу положительную отметку.
+        Поддерживает форматы: "+", "1", "да", "true", "v".
+        """
+        if idx is None or idx >= len(row):
+            return False
+        val = str(row[idx] or "").strip().lower()
+        return val in ("+", "1", "да", "true", "v")
+
+    def process_sheet(all_rows: list):
+        nonlocal total_changed, total_rows, total_errors
+        if len(all_rows) < 3:
+            return
+
+        header_idx = 0
+        for idx, row in enumerate(all_rows):
+            if any(
+                "таб.№" in str(c).lower() or "табельный" in str(c).lower()
+                for c in row
+                if c
+            ):
+                header_idx = idx
+                break
+
+        header_rows = [all_rows[header_idx], all_rows[header_idx + 1]]
+        indices = _get_col_indices(header_rows)
+
+        if "tab" not in indices:
+            total_errors += 1
+            return
+
+        updates = {}
+
+        for row in all_rows[header_idx + 2 :]:
+            if not any(row):
+                continue
+            total_rows += 1
+
+            try:
+                tab = _text(row[indices["tab"]])
+                if not tab or not str(tab).isdigit():
+                    total_errors += 1
+                    continue
+                tab = str(tab).zfill(7)
+
+                if tab not in updates:
+                    updates[tab] = {}
+
+                u = updates[tab]
+
+                if _has_mark(row, indices.get("plan_deg")):
+                    u["method"] = DEG
+                elif _has_mark(row, indices.get("plan_uik")):
+                    u["method"] = UIK
+                elif _has_mark(row, indices.get("plan_uvz")):
+                    u["method"] = UVZ
+                elif _has_mark(row, indices.get("plan_u19")):
+                    u["method"] = UIK19
+
+                if _has_mark(row, indices.get("mark_deg")):
+                    u["mark_deg"] = True
+                if _has_mark(row, indices.get("mark_uvz")):
+                    u["mark_uvz"] = True
+                if _has_mark(row, indices.get("detached")):
+                    u["detached"] = True
+                if _has_mark(row, indices.get("not_going")):
+                    u["not_going"] = True
+                if _has_mark(row, indices.get("absence")):
+                    u["absence"] = True
+
+                if _has_mark(row, indices.get("voted_deg")):
+                    u["voted"] = True
+                    u["voted_method"] = DEG
+                elif _has_mark(row, indices.get("voted_uik")):
+                    u["voted"] = True
+                    u["voted_method"] = UIK
+                elif _has_mark(row, indices.get("voted_uvz")):
+                    u["voted"] = True
+                    u["voted_method"] = UVZ
+                elif _has_mark(row, indices.get("voted_u19")):
+                    u["voted"] = True
+                    u["voted_method"] = UIK19
+
+            except Exception:
+                total_errors += 1
+                continue
+
+        if updates:
+            tabs_list = list(updates.keys())
+            existing = {
+                emp.tab_number: emp
+                for emp in Employee.objects.filter(tab_number__in=tabs_list)
+            }
+
+            to_update = []
+            for tab, fields in updates.items():
+                emp = existing.get(tab)
+                if not emp:
+                    total_errors += 1
+                    continue
+
+                changed = False
+                for field, value in fields.items():
+                    if getattr(emp, field) != value:
+                        setattr(emp, field, value)
+                        changed = True
+
+                if changed:
+                    to_update.append(emp)
+
+            if to_update:
+                # Собираем уникальный набор полей, которые были изменены в текущем пакете,
+                # чтобы обновить в базе только их и не перезаписывать остальные данные.
+                updated_fields = list(
+                    {field for u in updates.values() for field in u.keys()}
+                )
+                Employee.objects.bulk_update(
+                    to_update,
+                    fields=updated_fields,
+                    batch_size=BATCH,
+                )
+                total_changed += len(to_update)
+
+    try:
+        if upload.name.lower().endswith(".zip"):
+            with zipfile.ZipFile(upload, "r") as zip_ref:
+                for file_info in zip_ref.infolist():
+                    if file_info.filename.endswith(
+                        ".xlsx"
+                    ) and not file_info.filename.startswith("__MACOSX"):
+                        with zip_ref.open(file_info) as excel_file:
+                            file_content = io.BytesIO(zip_ref.read(file_info.filename))
+                            with _sheet(file_content) as rows:
+                                process_sheet(list(rows))
+        else:
+            with _sheet(upload) as rows:
+                process_sheet(list(rows))
+
+    except zipfile.BadZipFile:
+        raise ValueError("Ошибка: файл не является корректным zip-архивом")
+
+    return total_changed, total_rows, total_errors

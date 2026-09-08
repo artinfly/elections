@@ -43,6 +43,9 @@ urlpatterns = [
         name="upload_voting_choices",
     ),
     path("upload-turnout-hq/", views.upload_turnout_hq, name="upload_turnout_hq"),
+    path(
+        "upload-custom-report/", views.upload_custom_report, name="upload_custom_report"
+    ),
     # ==============================================================================
     # Экспорт отчетов в Excel и ZIP (скачивание файлов)
     # ==============================================================================
