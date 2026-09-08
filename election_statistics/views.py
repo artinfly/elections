@@ -24,7 +24,8 @@ from .custom_reports import custom_production_summary, custom_report
 from .helpers import COLUMNS
 from .importers import (
     import_base,
-    import_turnout_hq,
+    import_custom_report_archive,
+    import_turnout_hq_archive,
     import_voting_choices,
     mark_voted,
     set_turnout,
@@ -594,21 +595,47 @@ def upload_turnout_hq(request: HttpRequest) -> HttpResponse:
         return JsonResponse({"error": "нет прав"}, status=403)
 
     upload = request.FILES.get("file")
-    try:
-        _validate_excel_file(upload)
-    except ValueError as exc:
-        request.session["msg"] = str(exc)
+    if not upload or not upload.name.lower().endswith(".zip"):
+        request.session["msg"] = "Ошибка: принимается только формат .zip"
         return redirect("upload")
 
     try:
-        changed, total, errors = import_turnout_hq(upload)
+        changed, total, errors = import_turnout_hq_archive(upload)
         request.session["msg"] = (
-            f"Обработано строк: {total}. Отмечено явок: {changed}, "
-            f"ошибок/пропусков (нет в базе или не выбран способ): {errors}"
+            f"Обработано файлов в архиве. Всего строк {total}. "
+            f"Успешно отмечено явок: {changed},ошибок/пропусков: {errors}"
         )
     except ValueError as exc:
         request.session["msg"] = str(exc)
     except Exception as exc:
+        request.session["msg"] = f"Неожиданная ошибка: {str(exc)}"
+
+    return redirect("upload")
+
+
+@login_required
+@require_POST
+def upload_custom_report(request: HttpRequest) -> HttpResponse:
+    if not is_operator(request.user):
+        return JsonResponse({"error": "нет прав"}, status=403)
+
+    upload = request.FILES.get("file")
+    if not upload or not (
+        upload.name.lower().endswith(".zip") or upload.name.lower().endswith(".xlsx")
+    ):
+        request.session["msg"] = "Ошибка: принимается только формат .zip ИЛИ .xlsx"
+        return redirect("upload")
+
+    try:
+        changed, total, errors = import_custom_report_archive(upload)
+        request.session["msg"] = (
+            f"Обработано строк: {total}. Успешно обновлено записей: {changed}. "
+            f"Ошибок/пропусков (нет в базе): {errors}."
+        )
+
+    except ValueError as exc:
+        request.session["msg"] = str(exc)
+    except Exception as ecx:
         request.session["msg"] = f"Неожиданная ошибка: {str(exc)}"
 
     return redirect("upload")
