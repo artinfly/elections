@@ -3,7 +3,8 @@
 
 Описание:
     Содержит логику чтения выгрузок из Excel и записи данных в базу.
-    Поддерживает сценарии импорта базы, отчётов штаба и массовую простановку явки.
+    Поддерживает сценарии импорта основной базы, отчётов штаба,
+    массовую простановку явки и обработку сводных кастомных отчётов.
 """
 
 import io
@@ -15,7 +16,7 @@ from django.db.models import F
 from django.utils import timezone
 
 from .helpers import BATCH, COLUMNS, _date, _header, _sheet, _text
-from .models import Employee
+from .models import DEG, UIK, UIK19, UVZ, Employee
 
 # ==============================================================================
 # Импорт основной базы
@@ -23,6 +24,10 @@ from .models import Employee
 
 
 def _rows_by_tab(rows: Iterator, positions: dict) -> dict:
+    """
+    Парсит строки Excel-файла в словарь, ключом которого является табельный номер.
+    Преобразует типы данных в соответствии с картой колонок COLUMNS.
+    """
     parsed = {}
     for row in rows:
         if not any(row):
@@ -42,6 +47,10 @@ def _rows_by_tab(rows: Iterator, positions: dict) -> dict:
 
 
 def _known_rows(tabs: list, fields: list) -> dict:
+    """
+    Получает из базы данных существующие записи сотрудников по их табельным номерам.
+    Использует чанки по 2000 записей для оптимизации нагрузки на базу данных.
+    """
     known = {}
     tabs = list(tabs)
     for start in range(0, len(tabs), 2000):
@@ -54,6 +63,10 @@ def _known_rows(tabs: list, fields: list) -> dict:
 
 
 def import_base(upload: Any) -> tuple[int, int, int]:
+    """
+    Импортирует или обновляет основную базу сотрудников из Excel-файла.
+    Возвращает кортеж: (количество созданных, количество обновленных, всего обработано).
+    """
     with _sheet(upload) as rows:
         positions = _header(rows, COLUMNS)
         if "Таб№" not in positions:
@@ -88,6 +101,10 @@ def import_base(upload: Any) -> tuple[int, int, int]:
 
 
 def set_turnout(queryset: Any, voted: bool = True) -> int:
+    """
+    Массовое обновление статуса явки для переданного QuerySet.
+    При отметке явки также фиксируется текущее время и копируется запланированный способ голосования.
+    """
     return queryset.update(
         voted=voted,
         voted_at=timezone.now() if voted else None,
@@ -96,11 +113,14 @@ def set_turnout(queryset: Any, voted: bool = True) -> int:
 
 
 def mark_voted(tabs: list, voted: bool = True) -> tuple[int, int]:
+    """
+    Отмечает явку по списку табельных номеров.
+    Возвращает кортеж: (количество обновленных записей, количество не найденных в базе).
+    """
     tabs = {str(t) for t in tabs if t}
     if not tabs:
         return 0, 0
 
-    # Приводим к формату с нулями, если это цифры
     formatted_tabs = {t.zfill(7) if t.isdigit() else t for t in tabs}
 
     found = Employee.objects.filter(tab_number__in=formatted_tabs)
@@ -123,6 +143,11 @@ NEW_FORMAT_COLUMNS = {
 
 
 def import_voting_choices(upload: Any) -> tuple[int, int, int]:
+    """
+    Импортирует выбранные способы голосования из отчёта штаба.
+    Анализирует структуру файла, находит нужные колонки и обновляет поле method.
+    Возвращает: (обновлено, всего строк, ошибок/пропусков).
+    """
     with _sheet(upload) as rows:
         all_rows = list(rows)
 
@@ -241,6 +266,10 @@ def import_voting_choices(upload: Any) -> tuple[int, int, int]:
 
 
 def import_turnout(upload: Any) -> tuple[int, int, int]:
+    """
+    Импортирует явку из простого списка табельных номеров (одна колонка).
+    Пропускает сотрудников, у которых не выбран способ голосования.
+    """
     with _sheet(upload) as rows:
         all_rows = list(rows)
 
@@ -281,7 +310,10 @@ def import_turnout(upload: Any) -> tuple[int, int, int]:
 
 
 def _combine_datetime(date_val: Any, time_val: Any) -> datetime:
-    """Объединяет дату и время из ячеек Excel в timezone-aware datetime."""
+    """
+    Объединяет дату и время из ячеек Excel в timezone-aware datetime объект.
+    Поддерживает как нативные типы данных openpyxl, так и строковые представления.
+    """
     if not date_val and not time_val:
         return timezone.now()
 
@@ -320,10 +352,11 @@ def _combine_datetime(date_val: Any, time_val: Any) -> datetime:
 
 def import_turnout_hq_archive(upload: Any) -> tuple[int, int, int]:
     """
-    Импорт отметок явки из файла штаба с датой и временем.
-    1 колонка (индекс 0): табельный номер
-    4 колонка (индекс 4): дата
-    5 колонка (индекс 5): время
+    Импорт отметок явки из ZIP-архива отчётов штаба с датой и временем.
+    Ожидаемые индексы колонок в строке:
+    0: табельный номер
+    4: дата
+    5: время
     """
     total_changed = 0
     total_rows = 0
@@ -356,7 +389,7 @@ def import_turnout_hq_archive(upload: Any) -> tuple[int, int, int]:
                                 tab = str(tab).zfill(7)
 
                                 date_val = row[4] if len(row) > 4 else None
-                                time_val = row[4] if len(row) > 4 else None
+                                time_val = row[5] if len(row) > 5 else None
 
                                 all_tabs_data[tab] = _combine_datetime(
                                     date_val, time_val
@@ -393,12 +426,26 @@ def import_turnout_hq_archive(upload: Any) -> tuple[int, int, int]:
     return len(employees_to_update), total_rows, total_errors
 
 
+# ==============================================================================
+# Импорт кастомного сводного отчёта
+# ==============================================================================
+
+
 def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
+    """
+    Импортирует данные из кастомного сводного отчёта (Excel или ZIP с Excel).
+    Распознает сложные заголовки с объединенными ячейками (группа + подгруппа)
+    и обновляет соответствующие поля сотрудника: способ, явку, служебные отметки.
+    """
     total_changed = 0
     total_rows = 0
     total_errors = 0
 
     def _get_col_indices(header_rows: list) -> dict:
+        """
+        Сопоставляет индексы колонок Excel с внутренними полями модели Employee
+        на основе анализа текста в первой и второй строке заголовка.
+        """
         indices = {}
         for c_idx in range(len(header_rows[0])):
             group = str(header_rows[0][c_idx] or "").strip().lower()
@@ -409,7 +456,9 @@ def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
                 indices["tab"] = c_idx
             elif "дэг" in group and "планирует" in sub:
                 indices["plan_deg"] = c_idx
-            elif "дэг" in group and "зарегестрирован" in sub:
+            elif "дэг" in group and (
+                "зарегистрирован" in sub or "зарегестрирован" in sub
+            ):
                 indices["mark_deg"] = c_idx
             elif "дэг" in group and "проголосовал" in sub:
                 indices["voted_deg"] = c_idx
@@ -431,9 +480,18 @@ def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
                 indices["voted_u19"] = c_idx
             elif "уважительная" in combined or "причина" in combined:
                 indices["absence"] = c_idx
+            elif "открепился" in combined or "откреп" in combined:
+                indices["detached"] = c_idx
+            elif "не пойдет" in combined or "не пойдёт" in combined:
+                indices["not_going"] = c_idx
+
         return indices
 
     def _has_mark(row: list, idx: int) -> bool:
+        """
+        Проверяет, содержит ли ячейка по заданному индексу положительную отметку.
+        Поддерживает форматы: "+", "1", "да", "true", "v".
+        """
         if idx is None or idx >= len(row):
             return False
         val = str(row[idx] or "").strip().lower()
@@ -495,6 +553,8 @@ def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
                     u["mark_uvz"] = True
                 if _has_mark(row, indices.get("detached")):
                     u["detached"] = True
+                if _has_mark(row, indices.get("not_going")):
+                    u["not_going"] = True
                 if _has_mark(row, indices.get("absence")):
                     u["absence"] = True
 
@@ -539,9 +599,14 @@ def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
                     to_update.append(emp)
 
             if to_update:
+                # Собираем уникальный набор полей, которые были изменены в текущем пакете,
+                # чтобы обновить в базе только их и не перезаписывать остальные данные.
+                updated_fields = list(
+                    {field for u in updates.values() for field in u.keys()}
+                )
                 Employee.objects.bulk_update(
                     to_update,
-                    fields=list(set(f for u in updates.values() for f in u.keys())),
+                    fields=updated_fields,
                     batch_size=BATCH,
                 )
                 total_changed += len(to_update)
