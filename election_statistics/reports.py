@@ -407,6 +407,7 @@ def summary_table(
             plan_uvz=Count("id", filter=Q(method=UVZ)),
             plan_u19=Count("id", filter=Q(method=UIK19)),
             came=Count("id", filter=Q(voted=True)),
+            proxy_vote=Count("id", filter=Q(proxy_vote=True)),
         )
         .order_by(),
         key=lambda row: _by_number(row[group_field]),
@@ -416,7 +417,7 @@ def summary_table(
     sheet = book.active
     sheet.title = "Сводка"
 
-    for index, width in enumerate((18, 16, 10, 10, 12, 16, 10), 1):
+    for index, width in enumerate((18, 16, 10, 10, 12, 16, 10, 14), 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
 
     sheet.freeze_panes = "A2"
@@ -431,6 +432,7 @@ def summary_table(
         "УИК-УВЗ",
         "УИК-19",
         "Проголосовавшие",
+        "Через ответственного",
         "Процент",
     )
     for column, name in enumerate(headers, 1):
@@ -439,7 +441,16 @@ def summary_table(
         cell.alignment = centered
 
     totals = dict.fromkeys(
-        ("people", "plan_deg", "plan_uik", "plan_uvz", "plan_u19", "came"), 0
+        (
+            "people",
+            "plan_deg",
+            "plan_uik",
+            "plan_uvz",
+            "plan_u19",
+            "came",
+            "proxy_vote",
+        ),
+        0,
     )
     line = 2
     for row in rows:
@@ -450,6 +461,7 @@ def summary_table(
             row["plan_uvz"],
             row["plan_u19"],
             row["came"],
+            row["proxy_vote"],
         )
         # Номера цехов дополняются до 3 цифр, прочие группы пишутся как есть.
         label = (
@@ -461,7 +473,7 @@ def summary_table(
         for shift, value in enumerate(values, 2):
             sheet.cell(line, shift, value).alignment = Alignment(horizontal="center")
 
-        share = sheet.cell(line, 8, row["came"] / row["people"] if row["people"] else 0)
+        share = sheet.cell(line, 9, row["came"] / row["people"] if row["people"] else 0)
         share.number_format = "0.00%"
         share.alignment = Alignment(horizontal="center")
 
@@ -472,14 +484,23 @@ def summary_table(
     # Итоговая строка.
     sheet.cell(line, 1, "Итого").font = bold
     for shift, key in enumerate(
-        ("people", "plan_deg", "plan_uik", "plan_uvz", "plan_u19", "came"), 2
+        (
+            "people",
+            "plan_deg",
+            "plan_uik",
+            "plan_uvz",
+            "plan_u19",
+            "came",
+            "proxy_vote",
+        ),
+        2,
     ):
         cell = sheet.cell(line, shift, totals[key])
         cell.font = bold
         cell.alignment = Alignment(horizontal="center")
 
     share = sheet.cell(
-        line, 8, totals["came"] / totals["people"] if totals["people"] else 0
+        line, 9, totals["came"] / totals["people"] if totals["people"] else 0
     )
     share.font = bold
     share.number_format = "0.00%"
@@ -523,7 +544,10 @@ def export_xlsx() -> Any:
     sheet.title = "Сотрудники"
 
     # Заголовки колонок.
-    sheet.append(list(COLUMNS) + ["Способ (план)", "Проголосовал", "Где голосовал"])
+    sheet.append(
+        list(COLUMNS)
+        + ["Способ (план)", "Проголосовал", "Где голосовал", "Через ответственного"]
+    )
     fields = list(COLUMNS.values())
 
     # Итератор с размером пачки 2000 строк не держит всю таблицу в памяти.
@@ -536,6 +560,7 @@ def export_xlsx() -> Any:
         row.append(METHOD_LABELS.get(person.method, ""))
         row.append("да" if person.voted else "нет")
         row.append(METHOD_LABELS.get(person.voted_method, ""))
+        row.append("да" if person.proxy_vote else "нет")
         sheet.append(row)
     return book
 
@@ -771,5 +796,48 @@ def custom_reports_archive(
         archiver.add_workbook(
             department_custom_report(department, params, moment), f"{unique}.xlsx"
         )
+
+    return archiver
+
+
+def responsible_marks_archive() -> ReportArchiver:
+    departments = (
+        Employee.objects.exclude(department="")
+        .values_list("department", flat=True)
+        .distinct()
+        .order_by()
+    )
+    archiver = ReportArchiver()
+    taken = set()
+    bold = Font(bold=True)
+
+    for department in sorted(departments, key=_by_number):
+        book = openpyxl.Workbook()
+        sheet = book.active
+        sheet.title = f"Цех {department}"[:31]
+
+        sheet.append(["Цех", "Таб", "ФИО", "Отметка"])
+        for cell in sheet[1]:
+            cell.font = bold
+
+        for index, width in enumerate((10, 12, 42, 12), 1):
+            sheet.column_dimensions[get_column_letter(index)].width = width
+        sheet.freeze_panes = "A2"
+
+        people = Employee.objects.filter(department=department).order_by(
+            "surname", "name", "patronymic"
+        )
+        for person in people:
+            sheet.append(
+                [
+                    person.department,
+                    person.tab_number,
+                    person.fio,
+                    "+" if person.proxy_vote else "",
+                ]
+            )
+
+        unique = _unique_name(taken, department_file_name(department))
+        archiver.add_workbook(book, f"{unique}.xlsx")
 
     return archiver

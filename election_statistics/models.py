@@ -6,8 +6,8 @@
 во всех частях системы: от импорта данных до генерации Excel-отчетов.
 """
 
-from django.db import models
 from django.contrib.auth.models import User
+from django.db import models
 
 # ==============================================================================
 # Константы способов голосования
@@ -127,6 +127,12 @@ class Employee(models.Model):
     # Отметка об отсутствии по уважительной причине (УП).
     absence = models.BooleanField("Отсутствие по УП", default=False)
 
+    uik_tik = models.IntegerField("УИК ТИК", null=True, blank=True)
+    id_uik = models.IntegerField("ID УИК", null=True, blank=True)
+    proxy_vote = models.BooleanField(
+        "Голосование через ответственного", default=False, db_index=True
+    )
+
     class Meta:
         verbose_name = "Сотрудник"
         verbose_name_plural = "Сотрудники"
@@ -188,41 +194,22 @@ class Employee(models.Model):
         """
         return f"{self.tab_number} {self.fio}"
 
+
 class Profile(models.Model):
-    user = models.OneToOneField(
-        User,
-        on_delete=models.CASCADE,
-        related_name='profile'
-    )
-    api_key = models.CharField(
-        "API ключ",
-        max_length=64,
-        blank=True,
-        null=True
-    )
-    patronymic = models.CharField(
-        "Отчество",
-        max_length=255,
-        blank=True
-    )
-    is_fired = models.BooleanField(
-        "Уволен?",
-        default=False
-    )
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
+    api_key = models.CharField("API ключ", max_length=64, blank=True, null=True)
+    patronymic = models.CharField("Отчество", max_length=255, blank=True)
+    is_fired = models.BooleanField("Уволен?", default=False)
 
     last_synced_at = models.DateTimeField(
-        "Последняя синхронизация",
-        null=True,
-        blank=True
+        "Последняя синхронизация", null=True, blank=True
     )
-    sync_error = models.TextField(
-        "Ошибка последней синхронизации",
-        blank=True
-    )
+    sync_error = models.TextField("Ошибка последней синхронизации", blank=True)
 
     def __str__(self):
         return f"Profile({self.user.username})"
-    
+
+
 class EmployeeArchive(models.Model):
     tab_number = models.CharField("Таб№", max_length=20, unique=True)
     department = models.CharField("Подразделение", max_length=50, db_index=True)
@@ -257,10 +244,16 @@ class EmployeeArchive(models.Model):
     mark_uvz = models.BooleanField("Регистрация на УИК-УВЗ", default=False)
     mark_deg = models.BooleanField("Регистрация на ДЭГ", default=False)
     absence = models.BooleanField("Отсутствие по УП", default=False)
+    proxy_vote = models.BooleanField(
+        "Голосование через ответственного", default=False, db_index=True
+    )
+
+    uik_tik = models.IntegerField("УИК ТИК", null=True, blank=True)
+    id_uik = models.IntegerField("ID УИК", null=True, blank=True)
 
     class Meta:
-        verbose_name = "Сотрудник"
-        verbose_name_plural = "Сотрудники"
+        verbose_name = "Сотрудник(уволен)"
+        verbose_name_plural = "Сотрудники(уволенные)"
         ordering = ["surname", "name", "patronymic"]
 
     @property

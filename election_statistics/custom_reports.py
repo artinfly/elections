@@ -40,17 +40,37 @@ CUSTOM_COLUMNS: list[tuple[str, str, Callable]] = [
     ("ДЭГ", "Планирует", lambda p: p.method == DEG),
     ("ДЭГ", "Зарегистрирован", lambda p: p.method == DEG and p.mark_deg),
     ("ДЭГ", "Проголосовал", lambda p: p.voted and p.voted_method == DEG),
+    (
+        "ДЭГ",
+        "Проголосовал (ответственный)",
+        lambda p: p.proxy_vote and p.voted_method == DEG,
+    ),
     # Группа голосования на обычном участке
     ("На участке", "Планирует", lambda p: p.method == UIK),
     ("На участке", "Проголосовал", lambda p: p.voted and p.voted_method == UIK),
+    (
+        "На участке",
+        "Проголосовал (ответственный)",
+        lambda p: p.proxy_vote and p.voted_method == UIK,
+    ),
     # Группа голосования на участке УВЗ (на предприятии)
     ("На участке УВЗ", "Планирует", lambda p: p.method == UVZ),
     ("На участке УВЗ", "Заявление оформил", lambda p: p.method == UVZ and p.mark_uvz),
     ("На участке УВЗ", "Проголосовал", lambda p: p.voted and p.voted_method == UVZ),
+    (
+        "На участке УВЗ",
+        "Проголосовал (ответственный)",
+        lambda p: p.proxy_vote and p.voted_method == UVZ,
+    ),
     # Группа 19-го округа
     ("УИК-19", "Планирует", lambda p: p.method == UIK19),
     ("УИК-19", "Открепился", lambda p: p.method == UIK19 and p.detached),
     ("УИК-19", "Проголосовал", lambda p: p.voted and p.voted_method == UIK19),
+    (
+        "УИК-19",
+        "Проголосовал (ответственный)",
+        lambda p: p.proxy_vote and p.voted_method == UIK19,
+    ),
     # Одиночные колонки без группы (имя группы пустое).
     # "Не определился" — сотрудник не выбрал способ.
     # "Отсутствовал по УП" — сотрудник отметил уважительную причину отсутствия.

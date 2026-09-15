@@ -56,7 +56,7 @@
     {# ========================================================================= #}
     {# БЛОК 2: Загрузка сводной таблицы выборов (отчет штабу) #}
     {# ========================================================================= #}
-    <div class="col-md-6">
+    {% comment %} <div class="col-md-6">
         <div class="card-block h-100">
             <div class="block-title mb-3">2. Загрузка выборов способа голосования</div>
             
@@ -90,12 +90,53 @@
                 </ul>
             </div>
         </div>
+    </div> {% endcomment %}
+
+    {# ========================================================================= #}
+    {# БЛОК 3: #}
+    {# ========================================================================= #}
+    <div class="col-md-6">
+        <div class="card-block h-100">
+            <div class="block-title mb-3">2. Загрузка сводного отчёта (обновление меток)</div>
+            
+            <form method="post" action="{% url 'upload_custom_report' %}" enctype="multipart/form-data"
+                  onsubmit="return checkFile('file-custom', 'btn-custom', 'error-custom', 'progress-custom')">
+                {% csrf_token %}
+                <div class="file-row mb-2">
+                    <input type="file" name="file" id="file-custom" accept=".zip,.xlsx" class="form-control form-control-sm">
+                    <button class="btn-orange ms-2" type="submit" id="btn-custom">Загрузить</button>
+                </div>
+                
+                <div class="fmt-line mb-2">
+                    <span class="fmt-badge">.ZIP / .XLSX</span>
+                    <span>Формат: архив или файл.</span>
+                </div>
+                
+                <div id="progress-custom" class="hint text-primary" style="display:none">
+                    Идёт разбор файла и обновление меток, подождите...
+                </div>
+                <div id="error-custom" class="err-msg mt-2" style="display:none"></div>
+            </form>
+
+            <hr class="my-3">
+            
+            <div class="block-title" style="font-size: 0.9em;">Что обновляется по отметкам "+", "1", "да", "true", "v" :</div>
+            <div class="hint" style="font-size: 0.85em;">
+                <ul class="mb-0 ps-3">
+                    <li><b>Планирует:</b> обновляет способ голосования</li>
+                    <li><b>Проголосовал:</b> ставит явку  и место явки</li>
+                    <li><b>Зарегестрирован:</b> Зарегестрирован / Заявление оформлено</li>
+                    <li><b>Открепился:</b> ставит метку Открепился</li>
+                    <li><b>Уважительная причина:</b> ставит метку Уважительная причина</li>
+                </ul>
+            </div>
+        </div>
     </div>
 
     {# ========================================================================= #}
-    {# БЛОК 3: Загрузка отметок явки из файла штаба (с датой и временем) #}
+    {# БЛОК 4: Загрузка отметок явки из файла штаба (с датой и временем) #}
     {# ========================================================================= #}
-    <div class="col-md-12 mt-2">
+    <div class="col-md-6">
         <div class="card-block h-100">
             <div class="block-title mb-3">3. Загрузка отметок явки из файла штаба (с датой и временем)</div>
             
@@ -126,47 +167,52 @@
                     <li><b>1-я колонка (A):</b> Табельный номер</li>
                     <li><b>4-я колонка (D):</b> Дата голосования</li>
                     <li><b>5-я колонка (E):</b> Время голосования</li>
-                    <li class="text-danger"><b>Важно:</b> Явка проставляется <u>только</u> тем сотрудникам, которым ранее был назначен способ голосования. Строки без назначенного способа будут пропущены и учтены в графе «ошибки/пропуски».</li>
+                    <li class="text-danger"><b>Важно:</b> Явка проставляется <u>только</u> тем сотрудникам, которым ранее был назначен способ голосования. Строкам без назначенного способа будет проставлено УИК.</li>
                 </ul>
             </div>
         </div>
     </div>
     {# ========================================================================= #}
-    {# БЛОК 4: #}
+    {# БЛОК 5: Отметка о голосовании через ответственного #}
     {# ========================================================================= #}
-    <div class="col-md-12 mt-2">
+    <div class="col-md-6">
         <div class="card-block h-100">
-            <div class="block-title mb-3">4. Загрузка сводного отчёта (обновление меток)</div>
+            <div class="block-title mb-3">4. Голосование через ответственного</div>
+
+            <div class="mb-3">
+                <a class="btn-ghost" href="{% url 'export_responsible_template' %}">
+                    Скачать шаблон (архив по цехам)
+                </a>
+            </div>
             
-            <form method="post" action="{% url 'upload_custom_report' %}" enctype="multipart/form-data"
-                  onsubmit="return checkFile('file-custom', 'btn-custom', 'error-custom', 'progress-custom')">
+            <form method="post" action="{% url 'upload_responsible_marks' %}" enctype="multipart/form-data"
+                  onsubmit="return checkFile('file-responsible', 'btn-responsible', 'error-responsible', 'progress-responsible')">
                 {% csrf_token %}
                 <div class="file-row mb-2">
-                    <input type="file" name="file" id="file-custom" accept=".zip,.xlsx" class="form-control form-control-sm">
-                    <button class="btn-orange ms-2" type="submit" id="btn-custom">Загрузить</button>
+                    <input type="file" name="file" id="file-responsible" accept=".zip,.xlsx" class="form-control form-control-sm">
+                    <button class="btn-orange ms-2" type="submit" id="btn-responsible">Загрузить</button>
                 </div>
                 
                 <div class="fmt-line mb-2">
                     <span class="fmt-badge">.ZIP / .XLSX</span>
-                    <span>Формат: архив или файл.</span>
+                    <span>Формат: Цех | Таб | ФИО | Отметка (любой символ, кроме пробела).</span>
                 </div>
                 
-                <div id="progress-custom" class="hint text-primary" style="display:none">
-                    Идёт разбор файла и обновление меток, подождите...
+                <div id="progress-responsible" class="hint text-primary" style="display:none">
+                    Идёт разбор файла, подождите...
                 </div>
-                <div id="error-custom" class="err-msg mt-2" style="display:none"></div>
+                <div id="error-responsible" class="err-msg mt-2" style="display:none"></div>
             </form>
 
             <hr class="my-3">
             
-            <div class="block-title" style="font-size: 0.9em;">Что обновляется по знакам "+" :</div>
-            <div class="hint" style="font-size: 0.85em;">
+            <div class="block-title" style="font-size: 0.9em;">Как это работает:</div>
+            <div class="hint" style="font-size: 0.85rem;">
                 <ul class="mb-0 ps-3">
-                    <li><b>Планирует:</b> обновляет способ голосования</li>
-                    <li><b>Проголосовал:</b> ставит явку  и место явки</li>
-                    <li><b>Зарегестрирован:</b> Зарегестрирован / Заявление оформлено</li>
-                    <li><b>Открепился:</b> ставит метку detached</li>
-                    <li><b>Уважительная причина:</b> ставит метку absence</li>
+                    <li>Скачайте шаблон - архив с файлом на каждый цех: колонки "Цех", "Таб", "ФИО", "Отметка".</li>
+                    <li>Проставьте и загрузите обратно - можно .zip архивом целиком, можно отдельный .xlsx по одному цеху.</li>
+                    <li>Отметка проставится вместе с текущим временем. Способ голосования и обычная явка при этом не меняются.</li>
+                    <li>Если отметка уже стояла - при повторном скачивании шаблона в колонке будет "+".</li>
                 </ul>
             </div>
         </div>

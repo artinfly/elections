@@ -1,17 +1,17 @@
 import requests
-from django.contrib import admin
+from django import forms
+from django.conf import settings
+from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin
+from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.contrib.auth.models import User
+from django.db import transaction
 from django.http import JsonResponse
 from django.urls import path
-from django import forms
-from django.contrib.auth.forms import UserCreationForm, UserChangeForm
-from django.contrib import messages
 from django.utils import timezone
-from django.db import transaction
 
-from .models import Employee, Profile, EmployeeArchive
-from django.conf import settings
+from .models import Employee, EmployeeArchive, Profile
+
 # Сначала снимаем стандартную регистрацию модели User,
 # чтобы переопределить её нашим кастомным классом
 admin.site.unregister(User)
@@ -19,10 +19,13 @@ admin.site.unregister(User)
 API_PATH = settings.HR_SERVICE_API_URL
 BULK_SYNC_LIMIT = 100
 
+
 class CustomUserCreationForm(UserCreationForm):
     patronymic = forms.CharField(label="Отчество", max_length=255, required=False)
     api_key = forms.CharField(label="API-ключ", max_length=64, required=False)
-    is_fired = forms.BooleanField(label="Уволен?", required=False, widget=forms.CheckboxInput)
+    is_fired = forms.BooleanField(
+        label="Уволен?", required=False, widget=forms.CheckboxInput
+    )
 
     class Meta:
         model = User
@@ -32,7 +35,9 @@ class CustomUserCreationForm(UserCreationForm):
 class CustomUserChangeForm(UserChangeForm):
     patronymic = forms.CharField(label="Отчество", max_length=255, required=False)
     api_key = forms.CharField(label="API-ключ", max_length=64, required=False)
-    is_fired = forms.BooleanField(label="Уволен?", required=False, widget=forms.CheckboxInput)
+    is_fired = forms.BooleanField(
+        label="Уволен?", required=False, widget=forms.CheckboxInput
+    )
 
     class Meta:
         model = User
@@ -47,6 +52,7 @@ class CustomUserChangeForm(UserChangeForm):
             self.fields["api_key"].initial = profile.api_key
             self.fields["is_fired"].initial = profile.is_fired
 
+
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
     """
@@ -60,8 +66,8 @@ class CustomUserAdmin(UserAdmin):
 
     add_form = CustomUserCreationForm
     form = CustomUserChangeForm
-    add_form_template = 'admin/auth/user/add_form.html'
-    change_form_template = 'admin/auth/user/change_form.html'
+    add_form_template = "admin/auth/user/add_form.html"
+    change_form_template = "admin/auth/user/change_form.html"
 
     list_display = (
         "username",
@@ -69,8 +75,8 @@ class CustomUserAdmin(UserAdmin):
         "is_staff",
         "is_active",
         "last_login",
-        'get_is_fired', 
-        'get_last_synced_at',
+        "get_is_fired",
+        "get_last_synced_at",
     )
     list_filter = (
         "is_staff",
@@ -79,59 +85,91 @@ class CustomUserAdmin(UserAdmin):
         # Внимание: фильтр по дате последнего входа может быть ресурсоемким
         # на очень больших базах пользователей.
         "last_login",
-        'profile__is_fired',
+        "profile__is_fired",
     )
-    
+
     ordering = ("-last_login", "username")
     search_fields = ("^username",)  # ^ означает поиск "начинается с", что быстрее
 
-    actions = ['sync_with_external_api']
+    actions = ["sync_with_external_api"]
 
     fieldsets = (
-        (None, {
-            'fields': ('username', 'password')
-        }), 
-        ('Персональная информация', {
-            'fields': ('last_name', 'first_name', 'patronymic', 'api_key', 'is_fired')
-        }), 
-        ('Права доступа', {
-            'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')
-        }), 
-        ('Важные даты', {
-            'fields': ('last_login', 'date_joined')
-        }))
+        (None, {"fields": ("username", "password")}),
+        (
+            "Персональная информация",
+            {
+                "fields": (
+                    "last_name",
+                    "first_name",
+                    "patronymic",
+                    "api_key",
+                    "is_fired",
+                )
+            },
+        ),
+        (
+            "Права доступа",
+            {
+                "fields": (
+                    "is_active",
+                    "is_staff",
+                    "is_superuser",
+                    "groups",
+                    "user_permissions",
+                )
+            },
+        ),
+        ("Важные даты", {"fields": ("last_login", "date_joined")}),
+    )
 
     add_fieldsets = (
-        (None, {
-            "classes": ("wide",),
-            "fields": ("username", "last_name", "first_name", "patronymic", 
-                       "is_fired", "api_key", "password1", "password2"),
-        }),
+        (
+            None,
+            {
+                "classes": ("wide",),
+                "fields": (
+                    "username",
+                    "last_name",
+                    "first_name",
+                    "patronymic",
+                    "is_fired",
+                    "api_key",
+                    "password1",
+                    "password2",
+                ),
+            },
+        ),
     )
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related("profile")
-    
+
     def get_full_name(self, obj):
-        patronymic = getattr(obj.profile, "patronymic", "") if hasattr(obj, "profile") else ""
+        patronymic = (
+            getattr(obj.profile, "patronymic", "") if hasattr(obj, "profile") else ""
+        )
         parts = [obj.last_name, obj.first_name, patronymic]
         return " ".join(p for p in parts if p)
+
     get_full_name.short_description = "ФИО"
     get_full_name.admin_order_field = "last_name"
 
     def get_api_key(self, obj):
         return getattr(obj.profile, "api_key", "")
+
     get_api_key.short_description = "API ключ"
     get_api_key.admin_order_field = "profile__api_key"
 
     def get_is_fired(self, obj):
         return bool(getattr(obj.profile, "is_fired", False))
+
     get_is_fired.short_description = "Уволен?"
     get_is_fired.boolean = True
     get_is_fired.admin_order_field = "profile__is_fired"
 
     def get_last_synced_at(self, obj):
         return getattr(obj.profile, "last_synced_at", "")
+
     get_last_synced_at.short_description = "Дата синхронизации"
     get_last_synced_at.admin_order_field = "profile__last_synced_at"
 
@@ -159,32 +197,26 @@ class CustomUserAdmin(UserAdmin):
     def fetch_external_data(self, request, tab_number):
         api_key = getattr(getattr(request.user, "profile", None), "api_key", None)
         if not api_key:
-            return JsonResponse({
-                "error": "У текущего пользователя не задан API ключ"
-            }, status=400)
+            return JsonResponse(
+                {"error": "У текущего пользователя не задан API ключ"}, status=400
+            )
 
         url = f"{API_PATH}{tab_number}/"
 
         try:
             response = requests.get(
                 url,
-                headers={
-                    "X-API-Key": api_key
-                },
+                headers={"X-API-Key": api_key},
                 timeout=5,
             )
             response.raise_for_status()
         except requests.RequestException as e:
-            return JsonResponse({
-                "error": f"Ошибка обращения к API: {e}"
-            }, status=502)
+            return JsonResponse({"error": f"Ошибка обращения к API: {e}"}, status=502)
 
         try:
             data = response.json()
         except ValueError:
-            return JsonResponse({
-                "error": "Некорректный ответ от API"
-            }, status=502)
+            return JsonResponse({"error": "Некорректный ответ от API"}, status=502)
 
         result = {
             "surname": data.get("surname", ""),
@@ -201,9 +233,11 @@ class CustomUserAdmin(UserAdmin):
         }
 
         return JsonResponse(result)
-    
+
     def sync_with_external_api(self, request, queryset):
-        queryset = queryset.select_related("profile").order_by("profile__last_synced_at")
+        queryset = queryset.select_related("profile").order_by(
+            "profile__last_synced_at"
+        )
         total_selected = queryset.count()
         to_process = list(queryset[:BULK_SYNC_LIMIT])
 
@@ -214,7 +248,7 @@ class CustomUserAdmin(UserAdmin):
         if not api_key:
             self.message_user(request, "У вас не задан API-ключ!", level=messages.ERROR)
             return
-        
+
         for user in to_process:
             profile, _ = Profile.objects.get_or_create(user=user)
             tab_number = user.username
@@ -227,13 +261,7 @@ class CustomUserAdmin(UserAdmin):
 
             url = f"{API_PATH}{tab_number}/"
             try:
-                response = requests.get(
-                    url,
-                    headers={
-                        "X-API-Key": api_key
-                    },
-                    timeout=5
-                )
+                response = requests.get(url, headers={"X-API-Key": api_key}, timeout=5)
                 response.raise_for_status()
                 data = response.json()
             except (requests.RequestException, ValueError) as e:
@@ -261,7 +289,9 @@ class CustomUserAdmin(UserAdmin):
             msg += f" Не обработано(Превышен лимит {BULK_SYNC_LIMIT} за раз): {skipped}"
         self.message_user(request, msg)
 
-    sync_with_external_api.short_description = f"Синхронизация с сервисом персонала (До {BULK_SYNC_LIMIT} за раз)"
+    sync_with_external_api.short_description = (
+        f"Синхронизация с сервисом персонала (До {BULK_SYNC_LIMIT} за раз)"
+    )
 
 
 @admin.register(Employee)
@@ -290,6 +320,7 @@ class EmployeeAdmin(admin.ModelAdmin):
         "absence",
         "mark_uvz",
         "mark_deg",
+        "proxy_vote",
     )
 
     # Вычисляемые поля (ФИО, читаемые способы) доступны только для просмотра
@@ -312,16 +343,17 @@ class EmployeeAdmin(admin.ModelAdmin):
         "absence",
         "mark_uvz",
         "mark_deg",
+        "proxy_vote",
     )
 
-    actions = ["check_and_archive_fired"]
+    actions = ["check_and_archive_fired", "unmark_wrong_absence"]
 
     def check_and_archive_fired(self, request, queryset):
         api_key = getattr(getattr(request.user, "profile", None), "api_key", None)
         if not api_key:
             self.message_user(request, "У вас не задан API-ключ", level=messages.ERROR)
             return
-        
+
         total_selected = queryset.count()
         to_process = list(queryset)
 
@@ -359,33 +391,34 @@ class EmployeeAdmin(admin.ModelAdmin):
             try:
                 with transaction.atomic():
                     EmployeeArchive.objects.create(
-                        tab_number = employee.tab_number,
-                        department = employee.department,
-                        production = employee.production,
-                        service = employee.service,
-                        surname = employee.surname,
-                        name = employee.name,
-                        patronymic = employee.patronymic,
-                        position = employee.position,
-                        category = employee.category,
-                        birth_date = employee.birth_date,
-                        region = employee.region,
-                        city = employee.city,
-                        street = employee.street,
-                        house = employee.house,
-                        uik = employee.uik,
-                        uik_address = employee.uik_address,
-                        district = employee.district,
-                        okrug = employee.okrug,
-                        method = employee.method,
-                        voted = employee.voted,
-                        voted_method = employee.voted_method,
-                        voted_at = employee.voted_at,
-                        detached = employee.detached,
-                        not_going = employee.not_going,
-                        mark_uvz =  employee.mark_uvz,
-                        mark_deg = employee.mark_deg,
-                        absence = employee.absence,
+                        tab_number=employee.tab_number,
+                        department=employee.department,
+                        production=employee.production,
+                        service=employee.service,
+                        surname=employee.surname,
+                        name=employee.name,
+                        patronymic=employee.patronymic,
+                        position=employee.position,
+                        category=employee.category,
+                        birth_date=employee.birth_date,
+                        region=employee.region,
+                        city=employee.city,
+                        street=employee.street,
+                        house=employee.house,
+                        uik=employee.uik,
+                        uik_address=employee.uik_address,
+                        district=employee.district,
+                        okrug=employee.okrug,
+                        method=employee.method,
+                        voted=employee.voted,
+                        voted_method=employee.voted_method,
+                        voted_at=employee.voted_at,
+                        detached=employee.detached,
+                        not_going=employee.not_going,
+                        mark_uvz=employee.mark_uvz,
+                        mark_deg=employee.mark_deg,
+                        absence=employee.absence,
+                        proxy_vote=employee.proxy_vote,
                     )
                     employee.delete()
                 archived_count += 1
@@ -393,7 +426,7 @@ class EmployeeAdmin(admin.ModelAdmin):
                 self.message_user(
                     request,
                     f"Ошибка при архивации {employee.tab_number}: {e}",
-                    level=messages.ERROR
+                    level=messages.ERROR,
                 )
                 error_count += 1
 
@@ -407,7 +440,25 @@ class EmployeeAdmin(admin.ModelAdmin):
             msg += f" Не обработано (лимит {BULK_SYNC_LIMIT} за раз): {skipped}."
         self.message_user(request, msg)
 
-    check_and_archive_fired.short_description = f"Архивация уволенных (Может занять продолжительное время...)"
+    check_and_archive_fired.short_description = (
+        f"Архивация уволенных (Может занять продолжительное время...)"
+    )
+
+    def unmark_wrong_absence(self, request, queryset):
+        to_process = list(queryset)
+
+        processed_count = 0
+        emp_list = []
+
+        for employee in to_process:
+            if employee.method.strip() and employee.absence:
+                emp_list.append(employee.tab_number)
+                processed_count += 1
+        Employee.objects.filter(tab_number__in=emp_list).update(absence=False)
+        self.message_user(request, f"Снято отметок: {processed_count}")
+
+    unmark_wrong_absence.short_description = f"Снят отметку об УП"
+
 
 @admin.register(EmployeeArchive)
 class EmployeeArchiveAdmin(admin.ModelAdmin):
@@ -424,6 +475,7 @@ class EmployeeArchiveAdmin(admin.ModelAdmin):
         "absence",
         "mark_uvz",
         "mark_deg",
+        "proxy_vote",
     )
 
     readonly_fields = ("fio", "method_label", "voted_method_label")
@@ -440,11 +492,12 @@ class EmployeeArchiveAdmin(admin.ModelAdmin):
         "absence",
         "mark_uvz",
         "mark_deg",
+        "proxy_vote",
     )
 
     def has_add_permission(self, request):
         return False
-    
+
     def has_change_permission(self, request, obj=None):
         return False
 

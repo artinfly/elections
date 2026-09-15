@@ -406,20 +406,23 @@ def import_turnout_hq_archive(upload: Any) -> tuple[int, int, int]:
     tabs_list = list(all_tabs_data.keys())
     found = Employee.objects.filter(tab_number__in=tabs_list)
 
-    valid_found = found.exclude(method="")
+    # valid_found = found.exclude(method="")
     total_errors += (len(tabs_list) - found.count()) + found.filter(method="").count()
 
     employees_to_update = []
-    for emp in valid_found:
+    # for emp in valid_found:
+    for emp in found:
         emp.voted = True
         emp.voted_at = all_tabs_data[emp.tab_number]
+        if not emp.method:
+            emp.method = UIK
         emp.voted_method = emp.method
         employees_to_update.append(emp)
 
     if employees_to_update:
         Employee.objects.bulk_update(
             employees_to_update,
-            fields=["voted", "voted_at", "voted_method"],
+            fields=["voted", "voted_at", "voted_method", "method"],
             batch_size=BATCH,
         )
 
@@ -446,19 +449,34 @@ def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
         Сопоставляет индексы колонок Excel с внутренними полями модели Employee
         на основе анализа текста в первой и второй строке заголовка.
         """
+
+        def _fill_empty_group(header_row):
+            filled = []
+            last = ""
+            for val in header_row:
+                text = str(val or "").strip().lower()
+                if text:
+                    last = text
+                filled.append(last)
+            return filled
+
+        group_row = _fill_empty_group(header_rows[0])
+        sub_row = header_rows[1]
         indices = {}
-        for c_idx in range(len(header_rows[0])):
-            group = str(header_rows[0][c_idx] or "").strip().lower()
-            sub = str(header_rows[1][c_idx] or "").strip().lower()
+        # for c_idx in range(len(header_rows[0])):
+        #     group = str(header_rows[0][c_idx] or "").strip().lower()
+        #     sub = str(header_rows[1][c_idx] or "").strip().lower()
+        #     combined = f"{group}{sub}"
+        for c_idx in range(len(group_row)):
+            group = group_row[c_idx]
+            sub = str(sub_row[c_idx] or "").strip().lower()
             combined = f"{group}{sub}"
 
             if "таб.№" in combined or "табельный" in combined:
                 indices["tab"] = c_idx
             elif "дэг" in group and "планирует" in sub:
                 indices["plan_deg"] = c_idx
-            elif "дэг" in group and (
-                "зарегистрирован" in sub or "зарегестрирован" in sub
-            ):
+            elif "дэг" in group and ("зарегистрирован" in sub):
                 indices["mark_deg"] = c_idx
             elif "дэг" in group and "проголосовал" in sub:
                 indices["voted_deg"] = c_idx
@@ -468,20 +486,20 @@ def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
                 indices["voted_uik"] = c_idx
             elif "увз" in group and "планирует" in sub:
                 indices["plan_uvz"] = c_idx
-            elif "увз" in group and "заявление" in sub:
-                indices["mark_uvz"] = c_idx
+            # elif "увз" in group and "заявление" in sub:
+            #     indices["mark_uvz"] = c_idx
             elif "увз" in group and "проголосовал" in sub:
                 indices["voted_uvz"] = c_idx
             elif "19" in group and "планирует" in sub:
                 indices["plan_u19"] = c_idx
             elif "19" in group and "открепился" in sub:
-                indices["mark_u19"] = c_idx
+                indices["detached"] = c_idx
             elif "19" in group and "проголосовал" in sub:
                 indices["voted_u19"] = c_idx
             elif "уважительная" in combined or "причина" in combined:
                 indices["absence"] = c_idx
-            elif "открепился" in combined or "откреп" in combined:
-                indices["detached"] = c_idx
+            # elif "открепился" in combined or "откреп" in combined:
+            #     indices["detached"] = c_idx
             elif "не пойдет" in combined or "не пойдёт" in combined:
                 indices["not_going"] = c_idx
 
@@ -495,9 +513,10 @@ def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
         if idx is None or idx >= len(row):
             return False
         val = str(row[idx] or "").strip().lower()
-        return val in ("+", "1", "да", "true", "v")
+        # return val in ("+", "1", "да", "true", "v")
+        return bool(val)
 
-    def process_sheet(all_rows: list):
+    def process_sheet(all_rows: list, filename: str):
         nonlocal total_changed, total_rows, total_errors
         if len(all_rows) < 3:
             return
@@ -517,6 +536,7 @@ def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
 
         if "tab" not in indices:
             total_errors += 1
+            print(f"Ошибка в файле {filename}: не найден табельный номер")
             return
 
         updates = {}
@@ -548,10 +568,12 @@ def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
                     u["method"] = UIK19
 
                 if _has_mark(row, indices.get("mark_deg")):
+                    u["method"] = DEG
                     u["mark_deg"] = True
-                if _has_mark(row, indices.get("mark_uvz")):
-                    u["mark_uvz"] = True
+                # if _has_mark(row, indices.get("mark_uvz")):
+                #     u["mark_uvz"] = True
                 if _has_mark(row, indices.get("detached")):
+                    u["method"] = UIK19
                     u["detached"] = True
                 if _has_mark(row, indices.get("not_going")):
                     u["not_going"] = True
@@ -573,7 +595,26 @@ def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
 
             except Exception:
                 total_errors += 1
+                print(f"Ошибка в файле: {filename}")
                 continue
+
+        for tab, fields in updates.items():
+            other_marks = (
+                "plan_deg",
+                "plan_uik",
+                "plan_uvz",
+                "plan_u19",
+                "mark_deg",
+                "mark_uvz",
+                "detached",
+                "not_going",
+                "voted_deg",
+                "voted_uik",
+                "voted_uvz",
+                "voted_u19",
+            )
+            if any(fields.get(m) for m in other_marks):
+                fields.pop("absence", None)
 
         if updates:
             tabs_list = list(updates.keys())
@@ -621,12 +662,88 @@ def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
                         with zip_ref.open(file_info) as excel_file:
                             file_content = io.BytesIO(zip_ref.read(file_info.filename))
                             with _sheet(file_content) as rows:
-                                process_sheet(list(rows))
+                                process_sheet(list(rows), filename=file_info.filename)
         else:
             with _sheet(upload) as rows:
-                process_sheet(list(rows))
+                process_sheet(list(rows), filename=upload.name)
 
     except zipfile.BadZipFile:
         raise ValueError("Ошибка: файл не является корректным zip-архивом")
 
     return total_changed, total_rows, total_errors
+
+
+# ==============================================================================
+# Импорт отметок "Голосование через ответственного"
+# ==============================================================================
+RESPONSIBLE_COLUMNS = {
+    "Цех": "department",
+    "Таб": "tab_number",
+    "ФИО": "fio",
+    "Отметка": "mark",
+}
+
+
+def import_responsible_marks(upload: Any) -> tuple[int, int, int]:
+    total_rows = 0
+    total_errors = 0
+    marked_tabs = set()
+
+    def process_workbook(file_obj: Any) -> None:
+        nonlocal total_rows, total_errors
+        with _sheet(file_obj) as rows:
+            try:
+                positions = _header(rows, RESPONSIBLE_COLUMNS)
+            except ValueError:
+                total_errors += 1
+                return
+
+            tab_idx = positions.get("Таб")
+            mark_idx = positions.get("Отметка")
+            if tab_idx is None or mark_idx is None:
+                total_errors += 1
+                return
+
+            for row in rows:
+                if not any(row):
+                    continue
+                total_rows += 1
+
+                tab = _text(row[tab_idx] if tab_idx < len(row) else None)
+                if not tab:
+                    total_errors += 1
+                    continue
+                if tab.isdigit():
+                    tab = tab.zfill(7)
+
+                mark_val = row[mark_idx] if mark_idx < len(row) else None
+                if not _text(mark_val).strip():
+                    continue
+
+                marked_tabs.add(tab)
+
+    try:
+        if upload.name.lower().endswith(".zip"):
+            with zipfile.ZipFile(upload, "r") as zip_ref:
+                for file_info in zip_ref.infolist():
+                    if file_info.filename.endswith(
+                        ".xlsx"
+                    ) and not file_info.filename.startswith("__MACOSX"):
+                        file_content = io.BytesIO(zip_ref.read(file_info.filename))
+                        process_workbook(file_content)
+        else:
+            process_workbook(upload)
+    except zipfile.BadZipFile:
+        raise ValueError("Ошибка: файл не является корректным ZIP-архивом")
+
+    if not marked_tabs:
+        return 0, total_rows, total_errors
+
+    found = Employee.objects.filter(tab_number__in=marked_tabs)
+    changed = found.update(
+        proxy_vote=True,
+        voted_at=timezone.now(),
+    )
+    total_errors += len(marked_tabs) - found.count()
+
+    return changed, total_rows, total_errors

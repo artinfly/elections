@@ -46,11 +46,21 @@ urlpatterns = [
     path(
         "upload-custom-report/", views.upload_custom_report, name="upload_custom_report"
     ),
+    path(
+        "upload-responsible/",
+        views.upload_responsible_marks,
+        name="upload_responsible_marks",
+    ),
     # ==============================================================================
     # Экспорт отчетов в Excel и ZIP (скачивание файлов)
     # ==============================================================================
     # Выгрузка полного списка всех сотрудников со всеми данными.
     path("export/employees/", views.export_employees, name="export_employees"),
+    path(
+        "export/responsible-template/",
+        views.export_responsible_template,
+        name="export_responsible_template",
+    ),
     # Сводная таблица по цехам (план голосования и явка).
     path("export/summary/", views.export_summary, name="export_summary"),
     # Сводная таблица по цехам, исключая сотрудников 19-го округа.

@@ -25,6 +25,7 @@ from .helpers import COLUMNS
 from .importers import (
     import_base,
     import_custom_report_archive,
+    import_responsible_marks,
     import_turnout_hq_archive,
     import_voting_choices,
     mark_voted,
@@ -37,6 +38,7 @@ from .reports import (
     production_method_table,
     production_table,
     reports_archive,
+    responsible_marks_archive,
     summary_table,
     summary_table_no_u19,
 )
@@ -484,10 +486,10 @@ def elections_page(request: HttpRequest) -> HttpResponse:
 @login_required
 def upload_page(request: HttpRequest) -> HttpResponse:
     """
-    Страница загрузки файлов из Excel (доступна только операторам).
+    Страница загрузки файлов из Excel.
     """
-    if not is_operator(request.user):
-        return render(request, "access_denied.html", {"is_operator": False})
+    # if not is_operator(request.user):
+    #     return render(request, "access_denied.html", {"is_operator": False})
     return render(
         request,
         "upload.html",
@@ -591,8 +593,8 @@ def upload_turnout_hq(request: HttpRequest) -> HttpResponse:
     """
     Обработчик формы загрузки отметок явки из файла штаба (с датой и временем).
     """
-    if not is_operator(request.user):
-        return JsonResponse({"error": "нет прав"}, status=403)
+    # if not is_operator(request.user):
+    #     return JsonResponse({"error": "нет прав"}, status=403)
 
     upload = request.FILES.get("file")
     if not upload or not upload.name.lower().endswith(".zip"):
@@ -616,8 +618,8 @@ def upload_turnout_hq(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_POST
 def upload_custom_report(request: HttpRequest) -> HttpResponse:
-    if not is_operator(request.user):
-        return JsonResponse({"error": "нет прав"}, status=403)
+    # if not is_operator(request.user):
+    #     return JsonResponse({"error": "нет прав"}, status=403)
 
     upload = request.FILES.get("file")
     if not upload or not (
@@ -637,6 +639,31 @@ def upload_custom_report(request: HttpRequest) -> HttpResponse:
         request.session["msg"] = str(exc)
     except Exception as ecx:
         request.session["msg"] = f"Неожиданная ошибка: {str(exc)}"
+
+    return redirect("upload")
+
+
+@login_required
+@require_POST
+def upload_responsible_marks(request: HttpRequest) -> HttpResponse:
+    if not is_operator(request.user):
+        return JsonResponse({"error": "нет прав"}, status=403)
+
+    upload = request.FILES.get("file")
+    if not upload or not (
+        upload.name.lower().endswith(".zip") or upload.name.lower().endswith(".xlsx")
+    ):
+        request.session["msg"] = "Ошибка: принимается только формат .zip или .xlsx"
+        return redirect("upload")
+
+    try:
+        changed, total, errors = import_responsible_marks(upload)
+        request.session["msg"] = (
+            f"Обработано строк: {total}. Отмечено голосований через "
+            f"ответственного: {changed}. Ошибок/пропусков: {errors}."
+        )
+    except ValueError as exc:
+        request.session["msg"] = str(exc)
 
     return redirect("upload")
 
@@ -857,6 +884,25 @@ def export_production_methods_no_19(request: HttpRequest) -> HttpResponse:
 def export_employees(request: HttpRequest) -> HttpResponse:
     """Экспорт полной таблицы сотрудников."""
     return _make_excel_response(export_xlsx(), "employees")
+
+
+@login_required
+def export_responsible_template(request: HttpRequest) -> HttpResponse:
+    if not is_operator(request.user):
+        return render(request, "access_denied.html", {"is_operator": False})
+
+    moment = timezone.localtime()
+    archiver = responsible_marks_archive()
+
+    if not archiver.file_count:
+        request.session["msg"] = "Нет ни одного цеха - архив пустой"
+        return redirect("upload")
+
+    response = HttpResponse(archiver.build_bytes(), content_type="application/zip")
+    response["Content-Disposition"] = (
+        f'attachment; filename="shablon_otvetstvenny_{moment:%Y%m%d_%H%M}.zip'
+    )
+    return response
 
 
 def _archive_response(request: HttpRequest, mode: str, prefix: str) -> HttpResponse:

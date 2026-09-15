@@ -51,12 +51,12 @@
 
     {# Раздел "Данные": загрузка видна только операторам, отчёты — всем авторизованным #}
     <div class="nav-section">Данные</div>
-    {% if is_operator %}
+    {% comment %} {% if is_operator %} {% endcomment %}
     <a class="nav-link {% if request.resolver_match.url_name == 'upload' %}active{% endif %}" 
        href="{% url 'upload' %}">
         Загрузка
     </a>
-    {% endif %}
+    {% comment %} {% endif %} {% endcomment %}
     <a class="nav-link {% if request.resolver_match.url_name == 'export' %}active{% endif %}" 
        href="{% url 'export' %}">
         Отчёты
