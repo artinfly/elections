@@ -61,7 +61,13 @@ def _unique_name(taken: set, name: str) -> str:
 
 
 def _share_row(
-    sheet: Any, line: int, label: str, people: int, came: int, bold: Any = None
+    sheet: Any,
+    line: int,
+    label: str,
+    people: int,
+    came: int,
+    proxy: int = 0,
+    bold: Optional[Font] = None,
 ) -> int:
     """
     Записывает строку отчёта по производствам (всего / проголосовало / процент).
@@ -81,13 +87,14 @@ def _share_row(
         sheet.cell(line, 1, label),
         sheet.cell(line, 2, people),
         sheet.cell(line, 3, came),
-        sheet.cell(line, 4, came / people if people else 0),
+        sheet.cell(line, 4, proxy),
+        sheet.cell(line, 5, came / people if people else 0),
     )
     # Выравнивание числовых значений по центру.
     for cell in cells[1:]:
         cell.alignment = Alignment(horizontal="center")
     # Форматирование процента (например, 0.85 -> 85.00%).
-    cells[3].number_format = "0.00%"
+    cells[4].number_format = "0.00%"
 
     if bold:
         for cell in cells:
@@ -104,7 +111,7 @@ def _method_share_row(
     uik: int,
     uvz: int,
     u19: int,
-    bold: Any = None,
+    bold: Optional[Font] = None,
 ) -> int:
     """
     Записывает строку отчёта по способам голосования.
@@ -172,7 +179,11 @@ def production_table() -> Any:
     for row in (
         Employee.objects.exclude(department="")
         .values("service", "department")
-        .annotate(people=Count("id"), came=Count("id", filter=Q(voted=True)))
+        .annotate(
+            people=Count("id"),
+            came=Count("id", filter=Q(voted=True)),
+            proxy=Count("id", filter=Q(voted=True, proxy_vote=True)),
+        )
         .order_by()
     ):
         grouped.setdefault(row["service"] or NO_PRODUCTION, []).append(row)
@@ -182,7 +193,7 @@ def production_table() -> Any:
     sheet.title = "По производствам"
 
     # Настройка ширины колонок.
-    for index, width in enumerate((16, 14, 16, 10), 1):
+    for index, width in enumerate((16, 14, 18, 18, 10), 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
 
     # Фиксация заголовков при прокрутке.
@@ -192,14 +203,15 @@ def production_table() -> Any:
     # Объединение ячеек для сложных заголовков.
     sheet.merge_cells("A1:A2")
     sheet.merge_cells("B1:B2")
-    sheet.merge_cells("C1:D1")
+    sheet.merge_cells("C1:E1")
 
     for coordinate, title in (
         ("A1", "Подразделение"),
         ("B1", "Общее число работающих"),
         ("C1", "Итог"),
-        ("C2", "Количество проголосовавших"),
-        ("D2", "%"),
+        ("C2", "Количество проголосовавших (QR-код)"),
+        ("D2", "Количество проголосовавших (Ответственный)"),
+        ("E2", "%"),
     ):
         cell = sheet[coordinate]
         cell.value = title
@@ -209,7 +221,7 @@ def production_table() -> Any:
         )
 
     line = 3
-    total_people = total_came = 0
+    total_people = total_came = total_proxy = 0
 
     # Сортировка производств: обычные по алфавиту, "Без производства" всегда в конце.
     for production in sorted(grouped, key=lambda name: (name == NO_PRODUCTION, name)):
@@ -218,7 +230,7 @@ def production_table() -> Any:
         sheet.cell(line, 1, production).font = bold
         line += 1
 
-        people = came = 0
+        people = came = proxy = 0
         # Сортировка цехов внутри производства: числовые номера первыми.
         for row in sorted(
             grouped[production], key=lambda item: _by_number(item["department"])
@@ -229,17 +241,22 @@ def production_table() -> Any:
                 padded_number(row["department"]),
                 row["people"],
                 row["came"],
+                row["proxy"],
             )
             people += row["people"]
             came += row["came"]
+            proxy += row["proxy"]
 
         # Итог по производству.
-        line = _share_row(sheet, line, "Итого", people, came, bold=bold)
+        line = _share_row(sheet, line, "Итого", people, came, proxy=proxy, bold=bold)
         total_people += people
         total_came += came
+        total_proxy += proxy
 
     # Общий итог (с пустой строкой для визуального отделения).
-    _share_row(sheet, line + 1, "Всего", total_people, total_came, bold=bold)
+    _share_row(
+        sheet, line + 1, "Всего", total_people, total_came, proxy=total_proxy, bold=bold
+    )
     return book
 
 
@@ -407,6 +424,7 @@ def summary_table(
             plan_uvz=Count("id", filter=Q(method=UVZ)),
             plan_u19=Count("id", filter=Q(method=UIK19)),
             came=Count("id", filter=Q(voted=True)),
+            proxy_vote=Count("id", filter=Q(proxy_vote=True)),
         )
         .order_by(),
         key=lambda row: _by_number(row[group_field]),
@@ -416,7 +434,7 @@ def summary_table(
     sheet = book.active
     sheet.title = "Сводка"
 
-    for index, width in enumerate((18, 16, 10, 10, 12, 16, 10), 1):
+    for index, width in enumerate((18, 16, 10, 10, 12, 16, 10, 14), 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
 
     sheet.freeze_panes = "A2"
@@ -431,6 +449,7 @@ def summary_table(
         "УИК-УВЗ",
         "УИК-19",
         "Проголосовавшие",
+        "Через ответственного",
         "Процент",
     )
     for column, name in enumerate(headers, 1):
@@ -439,7 +458,16 @@ def summary_table(
         cell.alignment = centered
 
     totals = dict.fromkeys(
-        ("people", "plan_deg", "plan_uik", "plan_uvz", "plan_u19", "came"), 0
+        (
+            "people",
+            "plan_deg",
+            "plan_uik",
+            "plan_uvz",
+            "plan_u19",
+            "came",
+            "proxy_vote",
+        ),
+        0,
     )
     line = 2
     for row in rows:
@@ -450,6 +478,7 @@ def summary_table(
             row["plan_uvz"],
             row["plan_u19"],
             row["came"],
+            row["proxy_vote"],
         )
         # Номера цехов дополняются до 3 цифр, прочие группы пишутся как есть.
         label = (
@@ -461,7 +490,7 @@ def summary_table(
         for shift, value in enumerate(values, 2):
             sheet.cell(line, shift, value).alignment = Alignment(horizontal="center")
 
-        share = sheet.cell(line, 8, row["came"] / row["people"] if row["people"] else 0)
+        share = sheet.cell(line, 9, row["came"] / row["people"] if row["people"] else 0)
         share.number_format = "0.00%"
         share.alignment = Alignment(horizontal="center")
 
@@ -472,14 +501,23 @@ def summary_table(
     # Итоговая строка.
     sheet.cell(line, 1, "Итого").font = bold
     for shift, key in enumerate(
-        ("people", "plan_deg", "plan_uik", "plan_uvz", "plan_u19", "came"), 2
+        (
+            "people",
+            "plan_deg",
+            "plan_uik",
+            "plan_uvz",
+            "plan_u19",
+            "came",
+            "proxy_vote",
+        ),
+        2,
     ):
         cell = sheet.cell(line, shift, totals[key])
         cell.font = bold
         cell.alignment = Alignment(horizontal="center")
 
     share = sheet.cell(
-        line, 8, totals["came"] / totals["people"] if totals["people"] else 0
+        line, 9, totals["came"] / totals["people"] if totals["people"] else 0
     )
     share.font = bold
     share.number_format = "0.00%"
@@ -523,7 +561,15 @@ def export_xlsx() -> Any:
     sheet.title = "Сотрудники"
 
     # Заголовки колонок.
-    sheet.append(list(COLUMNS) + ["Способ (план)", "Проголосовал", "Где голосовал"])
+    sheet.append(
+        list(COLUMNS)
+        + [
+            "Способ (план)",
+            "Проголосовал (QR-код)",
+            "Где голосовал",
+            "Через ответственного",
+        ]
+    )
     fields = list(COLUMNS.values())
 
     # Итератор с размером пачки 2000 строк не держит всю таблицу в памяти.
@@ -536,6 +582,7 @@ def export_xlsx() -> Any:
         row.append(METHOD_LABELS.get(person.method, ""))
         row.append("да" if person.voted else "нет")
         row.append(METHOD_LABELS.get(person.voted_method, ""))
+        row.append("да" if person.proxy_vote else "нет")
         sheet.append(row)
     return book
 
@@ -561,9 +608,14 @@ def department_report(
     """
     rule = REPORT_MODES[mode]
     moment = moment or timezone.localtime()
-    people = Employee.objects.filter(department=department)
-    total = people.count()
-    done = people.filter(rule["done"]).count()
+
+    # ИСПРАВЛЕНО: Один агрегирующий запрос вместо двух .count() для снижения нагрузки на БД.
+    stats = Employee.objects.filter(department=department).aggregate(
+        total=Count("id"),
+        done=Count("id", filter=rule["done"]),
+    )
+    total = stats["total"]
+    done = stats["done"]
 
     book = openpyxl.Workbook()
     sheet = book.active
@@ -596,8 +648,10 @@ def department_report(
 
     # Список тех, у кого нужной отметки нет.
     row = 8
-    for person in people.exclude(rule["done"]).order_by(
-        "surname", "name", "patronymic"
+    for person in (
+        Employee.objects.filter(department=department)
+        .exclude(rule["done"])
+        .order_by("surname", "name", "patronymic")
     ):
         sheet.cell(row, 1, person.tab_number)
         sheet.cell(row, 2, person.fio)
@@ -771,5 +825,64 @@ def custom_reports_archive(
         archiver.add_workbook(
             department_custom_report(department, params, moment), f"{unique}.xlsx"
         )
+
+    return archiver
+
+
+def responsible_marks_archive() -> ReportArchiver:
+    """
+    Собирает ZIP-архив с отметками «Голосование через ответственного» по цехам.
+
+    Описание:
+        Генерирует отдельный Excel-файл для каждого цеха, содержащий список
+        сотрудников с отметкой proxy_vote. Использует итератор для защиты
+        от переполнения памяти при большом количестве сотрудников в цехе.
+
+    Возвращает:
+        ReportArchiver: наполненный сборщик архива (метод build() вызывается отдельно).
+    """
+    departments = (
+        Employee.objects.exclude(department="")
+        .values_list("department", flat=True)
+        .distinct()
+        .order_by()
+    )
+    archiver = ReportArchiver()
+    taken = set()
+    bold = Font(bold=True)
+
+    for department in sorted(departments, key=_by_number):
+        book = openpyxl.Workbook()
+        sheet = book.active
+        sheet.title = f"Цех {department}"[:31]
+
+        sheet.append(["Цех", "Таб.№", "ФИО", "Проголосовал (Если проголосовал то 1)"])
+        for cell in sheet[1]:
+            cell.font = bold
+
+        for index, width in enumerate((10, 12, 42, 12), 1):
+            sheet.column_dimensions[get_column_letter(index)].width = width
+        sheet.freeze_panes = "A2"
+
+        # ИСПРАВЛЕНО: Добавлен .iterator() для экономии оперативной памяти
+        # при большом количестве сотрудников в цехе.
+        people = (
+            Employee.objects.filter(department=department)
+            .order_by("surname", "name", "patronymic")
+            .iterator(chunk_size=2000)
+        )
+
+        for person in people:
+            sheet.append(
+                [
+                    person.department,
+                    person.tab_number,
+                    person.fio,
+                    "+" if person.proxy_vote else "",
+                ]
+            )
+
+        unique = _unique_name(taken, department_file_name(department))
+        archiver.add_workbook(book, f"{unique}.xlsx")
 
     return archiver
