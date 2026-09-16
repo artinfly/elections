@@ -13,10 +13,11 @@ from datetime import datetime
 from typing import Any, Callable, Optional
 
 import openpyxl
-from django.db.models import Q
+from django.db.models import QuerySet
 from django.utils import timezone
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
+from openpyxl.workbook import Workbook
 
 from .helpers import (
     NO_PRODUCTION,
@@ -32,14 +33,21 @@ from .models import DEG, UIK, UIK19, UVZ, Employee
 # ==============================================================================
 
 # Список колонок отчёта в формате: (Имя группы, Имя подколонки, Предикат-проверка).
-# Предикат — это функция, которая принимает объект сотрудника (p) и возвращает True,
-# если для него нужно поставить отметку в соответствующей колонке.
-# Если бизнес-логика колонки изменится, править нужно только этот список.
-CUSTOM_COLUMNS: list[tuple[str, str, Callable]] = [
+#
+# Структура:
+#   - Имя группы: название группы колонок (например, "ДЭГ", "На участке").
+#     Пустая строка означает одиночную колонку без общего заголовка.
+#   - Имя подколонки: название конкретной колонки внутри группы.
+#   - Предикат: функция, принимающая объект Employee и возвращающая True,
+#     если для сотрудника нужно поставить отметку "+" в этой колонке.
+#
+# ВАЖНО: Если бизнес-логика колонки изменится, править нужно ТОЛЬКО этот список.
+# Не нужно менять функции отрисовки или подсчёта — они автоматически адаптируются.
+CUSTOM_COLUMNS: list[tuple[str, str, Callable[[Employee], bool]]] = [
     # Группа ДЭГ (дистанционное электронное голосование)
     ("ДЭГ", "Планирует", lambda p: p.method == DEG),
     ("ДЭГ", "Зарегистрирован", lambda p: p.method == DEG and p.mark_deg),
-    ("ДЭГ", "Проголосовал", lambda p: p.voted and p.voted_method == DEG),
+    ("ДЭГ", "Проголосовал (QR-код)", lambda p: p.voted and p.voted_method == DEG),
     (
         "ДЭГ",
         "Проголосовал (ответственный)",
@@ -47,7 +55,11 @@ CUSTOM_COLUMNS: list[tuple[str, str, Callable]] = [
     ),
     # Группа голосования на обычном участке
     ("На участке", "Планирует", lambda p: p.method == UIK),
-    ("На участке", "Проголосовал", lambda p: p.voted and p.voted_method == UIK),
+    (
+        "На участке",
+        "Проголосовал (QR-код)",
+        lambda p: p.voted and p.voted_method == UIK,
+    ),
     (
         "На участке",
         "Проголосовал (ответственный)",
@@ -56,7 +68,11 @@ CUSTOM_COLUMNS: list[tuple[str, str, Callable]] = [
     # Группа голосования на участке УВЗ (на предприятии)
     ("На участке УВЗ", "Планирует", lambda p: p.method == UVZ),
     ("На участке УВЗ", "Заявление оформил", lambda p: p.method == UVZ and p.mark_uvz),
-    ("На участке УВЗ", "Проголосовал", lambda p: p.voted and p.voted_method == UVZ),
+    (
+        "На участке УВЗ",
+        "Проголосовал (QR-код)",
+        lambda p: p.voted and p.voted_method == UVZ,
+    ),
     (
         "На участке УВЗ",
         "Проголосовал (ответственный)",
@@ -65,7 +81,7 @@ CUSTOM_COLUMNS: list[tuple[str, str, Callable]] = [
     # Группа 19-го округа
     ("УИК-19", "Планирует", lambda p: p.method == UIK19),
     ("УИК-19", "Открепился", lambda p: p.method == UIK19 and p.detached),
-    ("УИК-19", "Проголосовал", lambda p: p.voted and p.voted_method == UIK19),
+    ("УИК-19", "Проголосовал (QR-код)", lambda p: p.voted and p.voted_method == UIK19),
     (
         "УИК-19",
         "Проголосовал (ответственный)",
@@ -88,7 +104,7 @@ CUSTOM_COLUMNS: list[tuple[str, str, Callable]] = [
 # ==============================================================================
 
 
-def _custom_qs(params: dict) -> Any:
+def _custom_qs(params: dict) -> QuerySet:
     """
     Строит QuerySet сотрудников на основе параметров формы конструктора.
 
@@ -202,8 +218,10 @@ def _draw_custom_groups(sheet: Any, start_row: int, start_col: int) -> list[Call
 
     column = start_col
     predicates = []
+
     for group, subs in _custom_groups():
         start, end = column, column + len(subs) - 1
+
         if group:
             # Объединяем ячейки для имени группы по горизонтали.
             sheet.merge_cells(
@@ -234,6 +252,7 @@ def _draw_custom_groups(sheet: Any, start_row: int, start_col: int) -> list[Call
                 cell.alignment = centered
             predicates.append(predicate)
             column += 1
+
     return predicates
 
 
@@ -242,7 +261,7 @@ def _draw_custom_groups(sheet: Any, start_row: int, start_col: int) -> list[Call
 # ==============================================================================
 
 
-def custom_report(params: dict) -> Any:
+def custom_report(params: dict) -> Workbook:
     """
     Генерирует сводный Excel-отчёт "По людям" на основе фильтров.
 
@@ -255,7 +274,7 @@ def custom_report(params: dict) -> Any:
         params: параметры фильтров конструктора.
 
     Возвращает:
-        Книга openpyxl с готовым отчётом.
+        Workbook: книга openpyxl с готовым отчётом.
     """
     people = _custom_qs(params).order_by(
         "department", "surname", "name", "patronymic", "uik"
@@ -325,7 +344,7 @@ def custom_report(params: dict) -> Any:
 
 def custom_production_summary(
     params: dict, include_depts: bool = False, moment: Optional[datetime] = None
-) -> Any:
+) -> Workbook:
     """
     Генерирует сводный отчёт с группировкой по производствам.
 
@@ -334,13 +353,16 @@ def custom_production_summary(
         Показывает количество сотрудников по каждому производству и процентные
         соотношения по колонкам из конструктора.
 
+        ВАЖНО: Использует поле service для группировки по производствам,
+        а не production. Это историческое несоответствие, см. reports.py.
+
     Аргументы:
         params: параметры фильтров конструктора.
         include_depts: если True, выводит строки по цехам внутри каждого производства.
         moment: момент времени для заголовка отчёта.
 
     Возвращает:
-        Книга openpyxl со сводным отчётом.
+        Workbook: книга openpyxl со сводным отчётом.
     """
     moment = moment or timezone.localtime()
 

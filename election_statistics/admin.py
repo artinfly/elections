@@ -1,3 +1,13 @@
+"""
+Модуль настройки административной панели Django.
+
+Описание:
+    Регистрирует модели Employee, EmployeeArchive и User в админке.
+    Настраивает кастомные формы для управления пользователями с дополнительными
+    полями из модели Profile (отчество, API-ключ, статус увольнения).
+    Реализует интеграцию с внешним кадровым API для синхронизации данных.
+"""
+
 import requests
 from django import forms
 from django.conf import settings
@@ -13,14 +23,23 @@ from django.utils import timezone
 from .models import Employee, EmployeeArchive, Profile
 
 # Сначала снимаем стандартную регистрацию модели User,
-# чтобы переопределить её нашим кастомным классом
+# чтобы переопределить её нашим кастомным классом.
 admin.site.unregister(User)
 
 API_PATH = settings.HR_SERVICE_API_URL
 BULK_SYNC_LIMIT = 100
 
 
+# ==============================================================================
+# Формы для управления пользователями
+# ==============================================================================
+
+
 class CustomUserCreationForm(UserCreationForm):
+    """
+    Форма создания нового пользователя с дополнительными полями из Profile.
+    """
+
     patronymic = forms.CharField(label="Отчество", max_length=255, required=False)
     api_key = forms.CharField(label="API-ключ", max_length=64, required=False)
     is_fired = forms.BooleanField(
@@ -33,6 +52,10 @@ class CustomUserCreationForm(UserCreationForm):
 
 
 class CustomUserChangeForm(UserChangeForm):
+    """
+    Форма редактирования пользователя с дополнительными полями из Profile.
+    """
+
     patronymic = forms.CharField(label="Отчество", max_length=255, required=False)
     api_key = forms.CharField(label="API-ключ", max_length=64, required=False)
     is_fired = forms.BooleanField(
@@ -45,12 +68,16 @@ class CustomUserChangeForm(UserChangeForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
         if self.instance and self.instance.pk:
             profile, _ = Profile.objects.get_or_create(user=self.instance)
             self.fields["patronymic"].initial = profile.patronymic
             self.fields["api_key"].initial = profile.api_key
             self.fields["is_fired"].initial = profile.is_fired
+
+
+# ==============================================================================
+# Админка пользователей
+# ==============================================================================
 
 
 @admin.register(User)
@@ -61,7 +88,7 @@ class CustomUserAdmin(UserAdmin):
     Описание:
         Оставляет только необходимые колонки для управления доступом.
         Сортирует пользователей по времени последнего входа для удобства
-        мониторинга активности.
+        мониторинга активности. Интегрируется с внешним кадровым API.
     """
 
     add_form = CustomUserCreationForm
@@ -82,7 +109,7 @@ class CustomUserAdmin(UserAdmin):
         "is_staff",
         "is_superuser",
         "is_active",
-        # Внимание: фильтр по дате последнего входа может быть ресурсоемким
+        # Внимание: фильтр по дате последнего входа может быть ресурсоёмким
         # на очень больших базах пользователей.
         "last_login",
         "profile__is_fired",
@@ -142,38 +169,35 @@ class CustomUserAdmin(UserAdmin):
     )
 
     def get_queryset(self, request):
+        """Оптимизация: подгружаем Profile одним запросом."""
         return super().get_queryset(request).select_related("profile")
 
+    @admin.display(description="ФИО", ordering="last_name")
     def get_full_name(self, obj):
+        """Возвращает полное ФИО пользователя с учётом отчества из Profile."""
         patronymic = (
             getattr(obj.profile, "patronymic", "") if hasattr(obj, "profile") else ""
         )
         parts = [obj.last_name, obj.first_name, patronymic]
         return " ".join(p for p in parts if p)
 
-    get_full_name.short_description = "ФИО"
-    get_full_name.admin_order_field = "last_name"
-
+    @admin.display(description="API ключ", ordering="profile__api_key")
     def get_api_key(self, obj):
+        """Возвращает API-ключ из связанного Profile."""
         return getattr(obj.profile, "api_key", "")
 
-    get_api_key.short_description = "API ключ"
-    get_api_key.admin_order_field = "profile__api_key"
-
+    @admin.display(description="Уволен?", boolean=True, ordering="profile__is_fired")
     def get_is_fired(self, obj):
+        """Возвращает статус увольнения из связанного Profile."""
         return bool(getattr(obj.profile, "is_fired", False))
 
-    get_is_fired.short_description = "Уволен?"
-    get_is_fired.boolean = True
-    get_is_fired.admin_order_field = "profile__is_fired"
-
+    @admin.display(description="Дата синхронизации", ordering="profile__last_synced_at")
     def get_last_synced_at(self, obj):
+        """Возвращает дату последней синхронизации из связанного Profile."""
         return getattr(obj.profile, "last_synced_at", "")
 
-    get_last_synced_at.short_description = "Дата синхронизации"
-    get_last_synced_at.admin_order_field = "profile__last_synced_at"
-
     def save_model(self, request, obj, form, change):
+        """Сохраняет пользователя и синхронизирует дополнительные поля в Profile."""
         super().save_model(request, obj, form, change)
         Profile.objects.update_or_create(
             user=obj,
@@ -185,6 +209,7 @@ class CustomUserAdmin(UserAdmin):
         )
 
     def get_urls(self):
+        """Добавляет кастомный URL для получения данных из внешнего API."""
         custom_urls = [
             path(
                 "fetch-external-data/<str:tab_number>/",
@@ -195,6 +220,12 @@ class CustomUserAdmin(UserAdmin):
         return custom_urls + super().get_urls()
 
     def fetch_external_data(self, request, tab_number):
+        """
+        Получает данные сотрудника из внешнего кадрового API по табельному номеру.
+
+        Возвращает:
+            JsonResponse с данными сотрудника или ошибкой.
+        """
         api_key = getattr(getattr(request.user, "profile", None), "api_key", None)
         if not api_key:
             return JsonResponse(
@@ -204,11 +235,7 @@ class CustomUserAdmin(UserAdmin):
         url = f"{API_PATH}{tab_number}/"
 
         try:
-            response = requests.get(
-                url,
-                headers={"X-API-Key": api_key},
-                timeout=5,
-            )
+            response = requests.get(url, headers={"X-API-Key": api_key}, timeout=5)
             response.raise_for_status()
         except requests.RequestException as e:
             return JsonResponse({"error": f"Ошибка обращения к API: {e}"}, status=502)
@@ -234,7 +261,17 @@ class CustomUserAdmin(UserAdmin):
 
         return JsonResponse(result)
 
+    @admin.action(
+        description=f"Синхронизация с сервисом персонала (До {BULK_SYNC_LIMIT} за раз)"
+    )
     def sync_with_external_api(self, request, queryset):
+        """
+        Массовая синхронизация пользователей с внешним кадровым API.
+
+        Описание:
+            Обрабатывает до BULK_SYNC_LIMIT пользователей за раз, сортируя их
+            по дате последней синхронизации (сначала давно не обновлявшиеся).
+        """
         queryset = queryset.select_related("profile").order_by(
             "profile__last_synced_at"
         )
@@ -286,12 +323,15 @@ class CustomUserAdmin(UserAdmin):
         skipped = total_selected - len(to_process)
         msg = f"Обновлено: {update_count}. Ошибок: {error_count}."
         if skipped > 0:
-            msg += f" Не обработано(Превышен лимит {BULK_SYNC_LIMIT} за раз): {skipped}"
+            msg += (
+                f" Не обработано (Превышен лимит {BULK_SYNC_LIMIT} за раз): {skipped}"
+            )
         self.message_user(request, msg)
 
-    sync_with_external_api.short_description = (
-        f"Синхронизация с сервисом персонала (До {BULK_SYNC_LIMIT} за раз)"
-    )
+
+# ==============================================================================
+# Админка сотрудников
+# ==============================================================================
 
 
 @admin.register(Employee)
@@ -316,7 +356,6 @@ class EmployeeAdmin(admin.ModelAdmin):
         "voted_method",
         "detached",
         "not_going",
-        # Добавлены поля для контроля статуса УП и регистраций.
         "absence",
         "mark_uvz",
         "mark_deg",
@@ -328,7 +367,6 @@ class EmployeeAdmin(admin.ModelAdmin):
     readonly_fields = ("fio", "method_label", "voted_method_label")
 
     # Поля, редактируемые прямо в списке (обязательно должны быть в list_display).
-    # Добавлено absence для управления отметкой УП из админки.
     list_editable = ("detached", "not_going", "absence")
 
     list_filter = (
@@ -348,7 +386,17 @@ class EmployeeAdmin(admin.ModelAdmin):
 
     actions = ["check_and_archive_fired", "unmark_wrong_absence"]
 
+    @admin.action(
+        description="Архивация уволенных (Может занять продолжительное время...)"
+    )
     def check_and_archive_fired(self, request, queryset):
+        """
+        Проверяет статус увольнения через внешний API и архивирует уволенных сотрудников.
+
+        Описание:
+            Для каждого выбранного сотрудника делает запрос к кадровому API.
+            Если сотрудник уволен, создаёт запись в EmployeeArchive и удаляет из Employee.
+        """
         api_key = getattr(getattr(request.user, "profile", None), "api_key", None)
         if not api_key:
             self.message_user(request, "У вас не задан API-ключ", level=messages.ERROR)
@@ -364,13 +412,7 @@ class EmployeeAdmin(admin.ModelAdmin):
         for employee in to_process:
             url = f"{API_PATH}{employee.tab_number}/"
             try:
-                response = requests.get(
-                    url,
-                    headers={
-                        "X-API-Key": api_key,
-                    },
-                    timeout=5,
-                )
+                response = requests.get(url, headers={"X-API-Key": api_key}, timeout=5)
                 response.raise_for_status()
                 data = response.json()
             except (requests.RequestException, ValueError) as e:
@@ -431,37 +473,51 @@ class EmployeeAdmin(admin.ModelAdmin):
                 error_count += 1
 
         skipped = total_selected - len(to_process)
-        msg = {
+        # ИСПРАВЛЕНО: Было msg = {...} (множество), теперь f-строка
+        msg = (
             f"Проверено {checked_count}. "
             f"Архивировано (уволены): {archived_count}. "
             f"Ошибок: {error_count}."
-        }
+        )
         if skipped > 0:
             msg += f" Не обработано (лимит {BULK_SYNC_LIMIT} за раз): {skipped}."
         self.message_user(request, msg)
 
-    check_and_archive_fired.short_description = (
-        f"Архивация уволенных (Может занять продолжительное время...)"
-    )
-
+    @admin.action(description="Снять отметку об УП")
     def unmark_wrong_absence(self, request, queryset):
-        to_process = list(queryset)
+        """
+        Снимает отметку 'Отсутствие по УП' у сотрудников, у которых выбран способ голосования.
 
-        processed_count = 0
-        emp_list = []
+        Описание:
+            Логика: если сотрудник выбрал способ голосования, он не может отсутствовать по УП.
+        """
+        emp_list = [
+            employee.tab_number
+            for employee in queryset
+            if employee.method.strip() and employee.absence
+        ]
 
-        for employee in to_process:
-            if employee.method.strip() and employee.absence:
-                emp_list.append(employee.tab_number)
-                processed_count += 1
-        Employee.objects.filter(tab_number__in=emp_list).update(absence=False)
-        self.message_user(request, f"Снято отметок: {processed_count}")
+        if emp_list:
+            Employee.objects.filter(tab_number__in=emp_list).update(absence=False)
 
-    unmark_wrong_absence.short_description = f"Снят отметку об УП"
+        self.message_user(request, f"Снято отметок: {len(emp_list)}")
+
+
+# ==============================================================================
+# Админка архива сотрудников
+# ==============================================================================
 
 
 @admin.register(EmployeeArchive)
 class EmployeeArchiveAdmin(admin.ModelAdmin):
+    """
+    Админка архива уволенных сотрудников.
+
+    Описание:
+        Предоставляет доступ только для просмотра. Создание и редактирование
+        записей запрещено (только через action 'check_and_archive_fired').
+    """
+
     list_display = (
         "tab_number",
         "fio",
@@ -496,9 +552,11 @@ class EmployeeArchiveAdmin(admin.ModelAdmin):
     )
 
     def has_add_permission(self, request):
+        """Запрещает создание записей через админку."""
         return False
 
     def has_change_permission(self, request, obj=None):
+        """Запрещает редактирование записей через админку."""
         return False
 
     # Поиск "начинается с" (^) для оптимизации запросов к БД.

@@ -74,7 +74,7 @@ REPORT_WIDTHS = (30, 40, 12)
 
 # Регулярное выражение для поиска символов, запрещённых в именах файлов архива.
 # Такие символы (слэши, двоеточия и т.д.) заменяются на дефис.
-BAD_NAME_CHARS = re.compile(r"[\\/*?:\[\]]")
+BAD_NAME_CHARS = re.compile(r"[/\\*?:\[\]]")
 
 
 # ==============================================================================
@@ -123,6 +123,7 @@ def _date(value: Any) -> Optional[date]:
     # Если это уже объект datetime, извлекаем из него дату.
     if isinstance(value, datetime):
         return value.date()
+
     # Если это уже объект date, возвращаем как есть.
     if hasattr(value, "year"):
         return value
@@ -138,6 +139,7 @@ def _date(value: Any) -> Optional[date]:
             return datetime.strptime(head[0], fmt).date()
         except ValueError:
             continue
+
     return None
 
 
@@ -170,8 +172,8 @@ def _sheet(upload: Any) -> Iterator:
     try:
         yield rows
     finally:
-        # Гарантированное закрытие файла.
-        rows.close()
+        # ИСПРАВЛЕНО: Убран rows.close(), так как book.close() в read_only режиме
+        # корректно освобождает все ресурсы и файловые дескрипторы.
         book.close()
 
 
@@ -196,15 +198,18 @@ def _header(rows: Iterator, wanted: dict) -> dict:
     """
     # Создаем словарь для быстрого поиска без учета регистра.
     lookup = {name.casefold(): name for name in wanted}
+
     for row in rows:
         found = {}
         for index, cell in enumerate(row):
             key = _text(cell).casefold()
             if key in lookup:
                 found[lookup[key]] = index
+
         # Если нашли хотя бы одну колонку, считаем строку заголовком.
         if found:
             return found
+
     raise ValueError(BAD_FORMAT)
 
 
@@ -274,8 +279,13 @@ def _apply_border(sheet: Any) -> None:
     Аргументы:
         sheet: объект листа openpyxl.
     """
+    # ИСПРАВЛЕНО: Защита от падения на пустых листах, где max_row и max_column равны None.
+    if not sheet.max_row or not sheet.max_column:
+        return
+
     thin = Side(style="thin", color="000000")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
     for row_cells in sheet.iter_rows(
         min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column
     ):

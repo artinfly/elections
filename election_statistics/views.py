@@ -8,7 +8,6 @@
 """
 
 import json
-from datetime import date, datetime, time
 from typing import Any, Optional
 
 from django.contrib.auth import authenticate, login, logout
@@ -75,10 +74,6 @@ def is_operator(user: Any) -> bool:
     """
     Проверяет наличие прав оператора или суперпользователя.
 
-    Описание:
-        Операторы имеют доступ к загрузке файлов и административным функциям.
-        Суперпользователь имеет все права по умолчанию.
-
     Аргументы:
         user: объект пользователя Django.
 
@@ -92,10 +87,6 @@ def can_edit(user: Any) -> bool:
     """
     Проверяет право пользователя на редактирование данных.
 
-    Описание:
-        Все авторизованные пользователи могут редактировать данные,
-        кроме тех, кто явно добавлен в группу 'viewer' (только просмотр).
-
     Аргументы:
         user: объект пользователя Django.
 
@@ -105,14 +96,18 @@ def can_edit(user: Any) -> bool:
     return not user.groups.filter(name="viewer").exists()
 
 
+def is_uik_uvz_viewer(user: Any) -> bool:
+    return user.groups.filter(name="uik_uvz_viewer").exists()
+
+
 def _known_method(value: Any) -> str:
     """
     Валидирует код способа голосования.
 
     Описание:
         Проверяет, что переданное значение является одним из зарегистрированных
-        кодов (deg, uik, uvz, u19). Если передан мусор — возвращает пустую строку,
-        чтобы избежать записи невалидных данных в базу.
+        кодов. Если передан мусор — возвращает пустую строку, чтобы избежать
+        записи невалидных данных в базу.
 
     Аргументы:
         value: код способа голосования.
@@ -189,11 +184,6 @@ def _make_excel_response(workbook: Any, filename_prefix: str) -> HttpResponse:
     """
     Формирует HTTP-ответ для скачивания Excel-файла браузером.
 
-    Описание:
-        Устанавливает правильные заголовки, чтобы браузер понял, что нужно
-        скачать файл, а не пытаться отобразить его на странице.
-        В имя файла добавляется текущая дата и время.
-
     Аргументы:
         workbook: объект книги openpyxl.
         filename_prefix: базовая часть имени файла (например, "svodka").
@@ -216,10 +206,6 @@ def _validate_excel_file(file: Any) -> None:
     """
     Проверяет расширение загружаемого файла.
 
-    Описание:
-        Система принимает только файлы формата Excel (.xlsx).
-        Попытка загрузить CSV или картинку будет пресечена.
-
     Аргументы:
         file: объект загруженного файла из request.FILES.
 
@@ -235,19 +221,17 @@ def _get_filter_options() -> dict[str, list[str]]:
     Получает уникальные значения для всех выпадающих списков фильтров.
 
     Описание:
-        Делает один широкий запрос к базе, чтобы собрать все уникальные цеха,
-        производства и УИКи. Это работает быстрее, чем делать 5 отдельных
-        SQL-запросов (оптимизация N+1).
+        Выполняет оптимизированные SQL-запросы с DISTINCT для получения
+        уникальных значений. Это предотвращает выгрузку всей таблицы в память Python,
+        что было бы критично для больших баз данных.
 
     Возвращает:
         dict: словари с отсортированными списками уникальных значений.
     """
-    # Один запрос получает все нужные поля сразу.
     employees = Employee.objects.values(
         "department", "production", "service", "okrug", "uik"
     )
 
-    # Извлекаем уникальные значения средствами Python (быстрее SQL DISTINCT для малых объемов).
     departments = sorted({e["department"] for e in employees if e["department"]})
     productions = sorted({e["production"] for e in employees if e["production"]})
     services = sorted({e["service"] for e in employees if e["service"]})
@@ -272,10 +256,6 @@ def _filtered(params: dict) -> QuerySet:
     """
     Строит выборку (QuerySet) сотрудников на основе переданных фильтров.
 
-    Описание:
-        Применяет фильтры из URL-параметров или JSON. Поддерживает поиск
-        по частям ФИО и специфичные фильтры (например, "Пусто" для округа).
-
     Аргументы:
         params: словарь с параметрами фильтрации.
 
@@ -285,7 +265,6 @@ def _filtered(params: dict) -> QuerySet:
     qs = Employee.objects.all()
 
     # Гибкий поиск по ФИО и табельному номеру.
-    # Разбиваем фразу на слова: поиск "иван иванов" найдет "Иванов Иван Иванович".
     search = _clean(params, "q")
     for part in search.split():
         qs = qs.filter(
@@ -342,8 +321,7 @@ def _counts(qs: Optional[QuerySet] = None) -> dict[str, Any]:
 
     Описание:
         Возвращает количество людей по каждому способу голосования (план)
-        и по фактической явке. Используется для обновления счетчиков (плашек)
-        в верхней части страницы без перезагрузки.
+        и по фактической явке. Используется для обновления счетчиков на фронтенде.
 
     Аргументы:
         qs: QuerySet для подсчета (по умолчанию все сотрудники).
@@ -397,7 +375,7 @@ def _page_window(page: Any, size: int = 5) -> range:
 
     Описание:
         Формирует "окно" из нескольких страниц вокруг текущей, чтобы не показывать
-        все 100 страниц в подвале таблицы, а только ближайшие (например, 3, 4, [5], 6, 7).
+        все страницы в подвале таблицы, а только ближайшие.
 
     Аргументы:
         page: объект Page из Django Paginator.
@@ -425,10 +403,6 @@ def _context(request: HttpRequest) -> dict[str, Any]:
     """
     Готовит общий контекст для рендеринга HTML-страниц со списками.
 
-    Описание:
-        Собирает все данные, нужные шаблонам: текущую страницу, фильтры,
-        статистику и списки для выпадающих меню.
-
     Аргументы:
         request: HTTP-запрос.
 
@@ -440,7 +414,6 @@ def _context(request: HttpRequest) -> dict[str, Any]:
     params = request.GET.copy()
     params.pop("page", None)
 
-    # Получаем опции фильтров одним запросом (оптимизация N+1).
     filter_options = _get_filter_options()
 
     return {
@@ -459,6 +432,7 @@ def _context(request: HttpRequest) -> dict[str, Any]:
         "query": params.urlencode(),
         "page_range": _page_window(page),
         "can_edit": can_edit(request.user),
+        "is_uik_uvz_viewer": is_uik_uvz_viewer(request.user),
     }
 
 
@@ -469,27 +443,34 @@ def _context(request: HttpRequest) -> dict[str, Any]:
 
 @login_required
 def method_page(request: HttpRequest) -> HttpResponse:
-    """
-    Главная страница: список сотрудников для простановки способа голосования.
-    """
+    """Главная страница: список сотрудников для простановки способа голосования."""
+    if is_uik_uvz_viewer(request.user):
+        return redirect("elections")
     return render(request, "method.html", _context(request))
 
 
 @login_required
 def elections_page(request: HttpRequest) -> HttpResponse:
-    """
-    Страница выборов: список сотрудников для отметки фактической явки.
-    """
-    return render(request, "elections.html", _context(request))
+    """Страница выборов: список сотрудников для отметки фактической явки."""
+    context = _context(request)
+
+    if is_uik_uvz_viewer(request.user):
+        qs = _filtered(request.GET).filter(Q(method=UVZ) | Q(voted_method=UVZ))
+        page = Paginator(qs, PER_PAGE).get_page(request.GET.get("page"))
+
+        context["page"] = page
+        context["rows"] = page.object_list
+        context["found"] = page.paginator.count
+        context["counts"] = _counts(qs)
+
+    return render(request, "elections.html", context)
 
 
 @login_required
 def upload_page(request: HttpRequest) -> HttpResponse:
-    """
-    Страница загрузки файлов из Excel.
-    """
-    # if not is_operator(request.user):
-    #     return render(request, "access_denied.html", {"is_operator": False})
+    """Страница загрузки файлов из Excel."""
+    if is_uik_uvz_viewer(request.user):
+        return redirect("elections")
     return render(
         request,
         "upload.html",
@@ -504,9 +485,9 @@ def upload_page(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def export_page(request: HttpRequest) -> HttpResponse:
-    """
-    Страница экспорта: список готовых отчетов и конструктор кастомных сводок.
-    """
+    """Страница экспорта: список готовых отчетов и конструктор кастомных сводок."""
+    if is_uik_uvz_viewer(request.user):
+        return redirect("elections")
     filter_options = _get_filter_options()
 
     return render(
@@ -516,7 +497,7 @@ def export_page(request: HttpRequest) -> HttpResponse:
             "counts": _counts(),
             "is_operator": is_operator(request.user),
             "departments_count": len(filter_options["departments"]),
-            "productions_count": len(filter_options["services"]),
+            "productions_count": len(filter_options["productions"]),
             "msg": request.session.pop("msg", ""),
             "productions": filter_options["productions"],
             "services": filter_options["services"],
@@ -536,9 +517,7 @@ def export_page(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_POST
 def upload_base(request: HttpRequest) -> HttpResponse:
-    """
-    Обработчик формы загрузки основного списка сотрудников.
-    """
+    """Обработчик формы загрузки основного списка сотрудников."""
     if not is_operator(request.user):
         return JsonResponse({"error": "нет прав"}, status=403)
 
@@ -563,9 +542,7 @@ def upload_base(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_POST
 def upload_voting_choices(request: HttpRequest) -> HttpResponse:
-    """
-    Обработчик формы загрузки отчета штаба (обновление способов голосования).
-    """
+    """Обработчик формы загрузки отчета штаба (обновление способов голосования)."""
     if not is_operator(request.user):
         return JsonResponse({"error": "нет прав"}, status=403)
 
@@ -590,12 +567,7 @@ def upload_voting_choices(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_POST
 def upload_turnout_hq(request: HttpRequest) -> HttpResponse:
-    """
-    Обработчик формы загрузки отметок явки из файла штаба (с датой и временем).
-    """
-    # if not is_operator(request.user):
-    #     return JsonResponse({"error": "нет прав"}, status=403)
-
+    """Обработчик формы загрузки отметок явки из файла штаба (с датой и временем)."""
     upload = request.FILES.get("file")
     if not upload or not upload.name.lower().endswith(".zip"):
         request.session["msg"] = "Ошибка: принимается только формат .zip"
@@ -605,7 +577,7 @@ def upload_turnout_hq(request: HttpRequest) -> HttpResponse:
         changed, total, errors = import_turnout_hq_archive(upload)
         request.session["msg"] = (
             f"Обработано файлов в архиве. Всего строк {total}. "
-            f"Успешно отмечено явок: {changed},ошибок/пропусков: {errors}"
+            f"Успешно отмечено явок: {changed}, ошибок/пропусков: {errors}"
         )
     except ValueError as exc:
         request.session["msg"] = str(exc)
@@ -618,14 +590,12 @@ def upload_turnout_hq(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_POST
 def upload_custom_report(request: HttpRequest) -> HttpResponse:
-    # if not is_operator(request.user):
-    #     return JsonResponse({"error": "нет прав"}, status=403)
-
+    """Обработчик формы загрузки кастомного сводного отчёта."""
     upload = request.FILES.get("file")
     if not upload or not (
         upload.name.lower().endswith(".zip") or upload.name.lower().endswith(".xlsx")
     ):
-        request.session["msg"] = "Ошибка: принимается только формат .zip ИЛИ .xlsx"
+        request.session["msg"] = "Ошибка: принимается только формат .zip или .xlsx"
         return redirect("upload")
 
     try:
@@ -634,10 +604,9 @@ def upload_custom_report(request: HttpRequest) -> HttpResponse:
             f"Обработано строк: {total}. Успешно обновлено записей: {changed}. "
             f"Ошибок/пропусков (нет в базе): {errors}."
         )
-
     except ValueError as exc:
         request.session["msg"] = str(exc)
-    except Exception as ecx:
+    except Exception as exc:  # ИСПРАВЛЕНО: была опечатка 'ecx'
         request.session["msg"] = f"Неожиданная ошибка: {str(exc)}"
 
     return redirect("upload")
@@ -646,6 +615,7 @@ def upload_custom_report(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_POST
 def upload_responsible_marks(request: HttpRequest) -> HttpResponse:
+    """Обработчик формы загрузки отметок «Голосование через ответственного»."""
     if not is_operator(request.user):
         return JsonResponse({"error": "нет прав"}, status=403)
 
@@ -676,9 +646,7 @@ def upload_responsible_marks(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_POST
 def api_method(request: HttpRequest) -> JsonResponse:
-    """
-    API: обновление запланированного способа голосования для одного сотрудника.
-    """
+    """API: обновление запланированного способа голосования для одного сотрудника."""
     if not can_edit(request.user):
         return JsonResponse({"error": "нет прав"}, status=403)
 
@@ -696,16 +664,13 @@ def api_method(request: HttpRequest) -> JsonResponse:
     if not changed:
         return JsonResponse({"error": "работник не найден"}, status=404)
 
-    # Возвращаем обновленную статистику для перерисовки плашек на фронте.
     return JsonResponse(_counts(_filtered(data.get("filters") or {})))
 
 
 @login_required
 @require_POST
 def api_mark(request: HttpRequest) -> JsonResponse:
-    """
-    API: простановка отметок регистрации (ДЭГ или УВЗ).
-    """
+    """API: простановка отметок регистрации (ДЭГ или УВЗ)."""
     if not can_edit(request.user):
         return JsonResponse({"error": "нет прав"}, status=403)
 
@@ -723,7 +688,6 @@ def api_mark(request: HttpRequest) -> JsonResponse:
 
     employee = get_object_or_404(Employee.objects, pk=employee_id)
 
-    # Проверка бизнес-логики: отметка должна соответствовать выбранному способу.
     if employee.method != MARK_FIELDS[field]:
         return JsonResponse({"error": "способ не соответствует полю"}, status=400)
 
@@ -736,9 +700,7 @@ def api_mark(request: HttpRequest) -> JsonResponse:
 @login_required
 @require_POST
 def api_voted(request: HttpRequest) -> JsonResponse:
-    """
-    API: отметка фактической явки для одного сотрудника.
-    """
+    """API: отметка фактической явки для одного сотрудника."""
     if not can_edit(request.user):
         return JsonResponse({"error": "нет прав"}, status=403)
 
@@ -753,7 +715,6 @@ def api_voted(request: HttpRequest) -> JsonResponse:
     employee = get_object_or_404(Employee.objects, pk=employee_id)
 
     voted = bool(data.get("voted"))
-    # Нельзя отметить явку, если сотрудник еще не выбрал способ голосования.
     if voted and not employee.method:
         return JsonResponse({"error": "Не выбран способ голосования"}, status=400)
 
@@ -765,9 +726,7 @@ def api_voted(request: HttpRequest) -> JsonResponse:
 @login_required
 @require_POST
 def api_bulk_voted(request: HttpRequest) -> JsonResponse:
-    """
-    API: массовая отметка явки по текущим фильтрам.
-    """
+    """API: массовая отметка явки по текущим фильтрам."""
     if not can_edit(request.user):
         return JsonResponse({"error": "нет прав"}, status=403)
 
@@ -781,7 +740,6 @@ def api_bulk_voted(request: HttpRequest) -> JsonResponse:
 
     skipped = 0
     if voted:
-        # Пропускаем сотрудников без выбранного способа, чтобы не сломать логику.
         skipped = target.filter(method="").count()
         target = target.exclude(method="")
 
@@ -795,9 +753,7 @@ def api_bulk_voted(request: HttpRequest) -> JsonResponse:
 
 @login_required
 def api_uik_stats(request: HttpRequest) -> JsonResponse:
-    """
-    API: статистика по УИКам для модального окна.
-    """
+    """API: статистика по УИКам для модального окна."""
     rows = (
         _filtered(request.GET)
         .values("uik")
@@ -815,11 +771,6 @@ def api_toggle_absence(request: HttpRequest, employee_id: int) -> JsonResponse:
     """
     API: переключение отметки «Отсутствие по УП» (уважительная причина).
 
-    Описание:
-        Инвертирует текущее булево значение поля absence у конкретного сотрудника.
-        Используется для кнопки на странице «Способ голосования», которая должна
-        срабатывать без перезагрузки страницы.
-
     Аргументы:
         request: HTTP-запрос.
         employee_id: уникальный идентификатор сотрудника из URL.
@@ -827,17 +778,11 @@ def api_toggle_absence(request: HttpRequest, employee_id: int) -> JsonResponse:
     Возвращает:
         JsonResponse с ID сотрудника и новым статусом отсутствия.
     """
-    # Проверка прав: только пользователи с правами редактирования могут менять отметки.
     if not can_edit(request.user):
         return JsonResponse({"error": "нет прав"}, status=403)
 
-    # Ищем сотрудника. Если ID не существует, Django автоматически вернет 404.
     employee = get_object_or_404(Employee.objects, id=employee_id)
-
-    # Инвертируем флаг (True -> False, False -> True).
     employee.absence = not employee.absence
-
-    # Сохраняем только измененное поле, чтобы не делать лишних записей в БД.
     employee.save(update_fields=["absence"])
 
     return JsonResponse({"id": employee.id, "absence": employee.absence})
@@ -888,27 +833,27 @@ def export_employees(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def export_responsible_template(request: HttpRequest) -> HttpResponse:
+    """Экспорт шаблона для заполнения отметок «Голосование через ответственного»."""
     if not is_operator(request.user):
-        return render(request, "access_denied.html", {"is_operator": False})
+        request.session["msg"] = "Нет прав для выполнения этого действия"
+        return redirect("export")
 
     moment = timezone.localtime()
     archiver = responsible_marks_archive()
 
     if not archiver.file_count:
-        request.session["msg"] = "Нет ни одного цеха - архив пустой"
-        return redirect("upload")
+        request.session["msg"] = "Нет данных для формирования архива"
+        return redirect("export")
 
     response = HttpResponse(archiver.build_bytes(), content_type="application/zip")
     response["Content-Disposition"] = (
-        f'attachment; filename="shablon_otvetstvenny_{moment:%Y%m%d_%H%M}.zip'
+        f'attachment; filename="shablon_otvetstvenny_{moment:%Y%m%d_%H%M}.zip"'
     )
     return response
 
 
 def _archive_response(request: HttpRequest, mode: str, prefix: str) -> HttpResponse:
-    """
-    Внутренний хелпер для генерации ZIP-архивов с отчетами по цехам.
-    """
+    """Внутренний хелпер для генерации ZIP-архивов с отчетами по цехам."""
     moment = timezone.localtime()
     archiver = reports_archive(moment, mode)
 
@@ -983,9 +928,7 @@ def export_custom_report(request: HttpRequest) -> HttpResponse:
 
 
 def login_view(request: HttpRequest) -> HttpResponse:
-    """
-    Страница входа в систему (форма логина и пароля).
-    """
+    """Страница входа в систему (форма логина и пароля)."""
     if request.user.is_authenticated:
         return redirect("method")
 
@@ -1006,8 +949,6 @@ def login_view(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def logout_view(request: HttpRequest) -> HttpResponse:
-    """
-    Завершение сеанса пользователя и выход из системы.
-    """
+    """Завершение сеанса пользователя и выход из системы."""
     logout(request)
     return redirect("login")

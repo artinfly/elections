@@ -1,235 +1,203 @@
 {% extends "base.html" %}
+
 {% block title %}Загрузка данных{% endblock %}
 
 {% block content %}
-{# Шапка страницы: заголовок и общее число работников в базе #}
-<div class="page-header">
-    <h5>Загрузка данных</h5>
-    <span class="row-count-label">в базе работников: {{ counts.method.total }}</span>
-</div>
+    {# === ШАПКА СТРАНИЦЫ === #}
+    <div class="page-header">
+        <h5>Загрузка данных</h5>
+        <span class="row-count-label">в базе работников: {{ counts.method.total }}</span>
+    </div>
 
-{# Сообщение об итогах предыдущей загрузки (универсальное для всех типов) #}
-{% if msg %}
-    <div class="ok-msg mb-3">{{ msg }}</div>
-{% endif %}
+    {# === СООБЩЕНИЕ ОБ ИТОГАХ ПРЕДЫДУЩЕЙ ЗАГРУЗКИ === #}
+    {% if msg %}
+        <div class="ok-msg mb-3">{{ msg }}</div>
+    {% endif %}
 
-<div class="row g-4">
-    {# ========================================================================= #}
-    {# БЛОК 1: Загрузка основной базы сотрудников #}
-    {# ========================================================================= #}
-    <div class="col-md-6">
-        <div class="card-block h-100">
-            <div class="block-title mb-3">1. Загрузка базы сотрудников</div>
-            
-            <form method="post" action="{% url 'upload_base' %}" enctype="multipart/form-data"
-                  onsubmit="return checkFile('file-base', 'btn-base', 'error-base', 'progress-base')">
-                {% csrf_token %}
-                <div class="file-row mb-2">
-                    <input type="file" name="file" id="file-base" accept=".xlsx" class="form-control form-control-sm">
-                    <button class="btn-orange ms-2" type="submit" id="btn-base">Загрузить</button>
-                </div>
+    <div class="row g-4">
+        {# ========================================================================= #}
+        {# БЛОК 1: Загрузка основной базы сотрудников #}
+        {# ========================================================================= #}
+        <div class="col-md-6">
+            <div class="card-block h-100">
+                <div class="block-title mb-3">1. Загрузка базы сотрудников</div>
                 
-                <div class="fmt-line mb-2">
-                    <span class="fmt-badge">XLSX</span>
-                    <span>Принимается только этот формат. Старый <b>.xls</b> не читается — сохраните файл как «Книга Excel (*.xlsx)».</span>
-                </div>
-                
-                <div id="progress-base" class="hint text-primary" style="display:none">
-                    Идёт разбор файла, подождите...
-                </div>
-                <div id="error-base" class="err-msg mt-2" style="display:none"></div>
-            </form>
+                <form method="post" action="{% url 'upload_base' %}" enctype="multipart/form-data"
+                      onsubmit="return checkFile('file-base', 'btn-base', 'error-base', 'progress-base', ['.xlsx'])">
+                    {% csrf_token %}
+                    <div class="file-row mb-2">
+                        <input type="file" name="file" id="file-base" accept=".xlsx" class="form-control form-control-sm">
+                        <button class="btn-orange ms-2" type="submit" id="btn-base">Загрузить</button>
+                    </div>
+                    
+                    <div class="fmt-line mb-2">
+                        <span class="fmt-badge">XLSX</span>
+                        <span>Принимается только этот формат. Старый <b>.xls</b> не читается — сохраните файл как «Книга Excel (*.xlsx)».</span>
+                    </div>
+                    
+                    <div id="progress-base" class="hint text-primary" style="display:none">
+                        Идёт разбор файла, подождите...
+                    </div>
+                    <div id="error-base" class="err-msg mt-2" style="display:none"></div>
+                </form>
 
-            <hr class="my-3">
-            
-            <div class="block-title" style="font-size: 0.9em;">Ожидаемые колонки:</div>
-            <div class="chip-grid mb-2">
-                {% for name in columns %}<span class="chip">{{ name }}</span>{% endfor %}
+                <hr class="my-3">
+                
+                <div class="block-title" style="font-size: 0.9em;">Ожидаемые колонки:</div>
+                <div class="chip-grid mb-2">
+                    {% for name in columns %}
+                        <span class="chip">{{ name }}</span>
+                    {% endfor %}
+                </div>
+                <div class="hint" style="font-size: 0.85em;">
+                    Порядок колонок не важен, «№ п/п» и «CARD_ID» игнорируются. 
+                    Ключ — <b>«Таб№»</b>: повторная загрузка обновляет данные, но <b>не стирает</b> проставленные способ и явку.
+                </div>
             </div>
-            <div class="hint" style="font-size: 0.85em;">
-                Порядок колонок не важен, «№ п/п» и «CARD_ID» игнорируются. 
-                Ключ — <b>«Таб№»</b>: повторная загрузка обновляет данные, но <b>не стирает</b> проставленные способ и явку.
+        </div>
+
+        {# ========================================================================= #}
+        {# БЛОК 2: Загрузка сводного отчёта (обновление меток) #}
+        {# ========================================================================= #}
+        <div class="col-md-6">
+            <div class="card-block h-100">
+                <div class="block-title mb-3">2. Загрузка сводного отчёта (обновление меток)</div>
+                
+                <form method="post" action="{% url 'upload_custom_report' %}" enctype="multipart/form-data"
+                      onsubmit="return checkFile('file-custom', 'btn-custom', 'error-custom', 'progress-custom', ['.zip', '.xlsx'])">
+                    {% csrf_token %}
+                    <div class="file-row mb-2">
+                        <input type="file" name="file" id="file-custom" accept=".zip,.xlsx" class="form-control form-control-sm">
+                        <button class="btn-orange ms-2" type="submit" id="btn-custom">Загрузить</button>
+                    </div>
+                    
+                    <div class="fmt-line mb-2">
+                        <span class="fmt-badge">.ZIP / .XLSX</span>
+                        <span>Формат: архив или файл.</span>
+                    </div>
+                    
+                    <div id="progress-custom" class="hint text-primary" style="display:none">
+                        Идёт разбор файла и обновление меток, подождите...
+                    </div>
+                    <div id="error-custom" class="err-msg mt-2" style="display:none"></div>
+                </form>
+
+                <hr class="my-3">
+                
+                <div class="block-title" style="font-size: 0.9em;">Что обновляется по отметкам "+", "1", "да", "true", "v":</div>
+                <div class="hint" style="font-size: 0.85em;">
+                    <ul class="mb-0 ps-3">
+                        <li><b>Планирует:</b> обновляет способ голосования.</li>
+                        <li><b>Проголосовал:</b> ставит явку и место явки.</li>
+                        <li><b>Зарегистрирован:</b> Зарегистрирован / Заявление оформлено.</li>
+                        <li><b>Открепился:</b> ставит метку «Открепился».</li>
+                        <li><b>Уважительная причина:</b> ставит метку «Уважительная причина».</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        {# ========================================================================= #}
+        {# БЛОК 3: Загрузка отметок явки из файла штаба (с датой и временем) #}
+        {# ========================================================================= #}
+        <div class="col-md-6">
+            <div class="card-block h-100">
+                <div class="block-title mb-3">3. Загрузка отметок явки из файла штаба</div>
+                
+                <form method="post" action="{% url 'upload_turnout_hq' %}" enctype="multipart/form-data"
+                      onsubmit="return checkFile('file-turnout', 'btn-turnout', 'error-turnout', 'progress-turnout', ['.zip'])">
+                    {% csrf_token %}
+                    <div class="file-row mb-2">
+                        <input type="file" name="file" id="file-turnout" accept=".zip" class="form-control form-control-sm">
+                        <button class="btn-orange ms-2" type="submit" id="btn-turnout">Загрузить</button>
+                    </div>
+                    
+                    <div class="fmt-line mb-2">
+                        <span class="fmt-badge">.ZIP</span>
+                        <span>Формат: ZIP-архив, внутри которого лежат файлы .xlsx с отчётом штаба.</span>
+                    </div>
+                    
+                    <div id="progress-turnout" class="hint text-primary" style="display:none">
+                        Идёт разбор файла и простановка явки, подождите...
+                    </div>
+                    <div id="error-turnout" class="err-msg mt-2" style="display:none"></div>
+                </form>
+
+                <hr class="my-3">
+                
+                <div class="block-title" style="font-size: 0.9em;">Требования к файлу:</div>
+                <div class="hint" style="font-size: 0.85em;">
+                    <ul class="mb-0 ps-3">
+                        <li><b>1-я колонка (A):</b> Табельный номер.</li>
+                        <li><b>4-я колонка (D):</b> Дата голосования.</li>
+                        <li><b>5-я колонка (E):</b> Время голосования.</li>
+                        <li class="text-danger"><b>Важно:</b> Явка проставляется <u>только</u> тем сотрудникам, которым ранее был назначен способ голосования. Строкам без назначенного способа будет автоматически проставлен УИК.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        {# ========================================================================= #}
+        {# БЛОК 4: Отметка о голосовании через ответственного #}
+        {# ========================================================================= #}
+        <div class="col-md-6">
+            <div class="card-block h-100">
+                <div class="block-title mb-3">4. Голосование через ответственного</div>
+
+                <div class="mb-3">
+                    <a class="btn-ghost" href="{% url 'export_responsible_template' %}">
+                        Скачать шаблон (архив по цехам)
+                    </a>
+                </div>
+                
+                <form method="post" action="{% url 'upload_responsible_marks' %}" enctype="multipart/form-data"
+                      onsubmit="return checkFile('file-responsible', 'btn-responsible', 'error-responsible', 'progress-responsible', ['.zip', '.xlsx'])">
+                    {% csrf_token %}
+                    <div class="file-row mb-2">
+                        <input type="file" name="file" id="file-responsible" accept=".zip,.xlsx" class="form-control form-control-sm">
+                        <button class="btn-orange ms-2" type="submit" id="btn-responsible">Загрузить</button>
+                    </div>
+                    
+                    <div class="fmt-line mb-2">
+                        <span class="fmt-badge">.ZIP / .XLSX</span>
+                        <span>Формат: Цех | Таб | ФИО | Проголосовал (Если проголосовал то 1).</span>
+                    </div>
+                    
+                    <div id="progress-responsible" class="hint text-primary" style="display:none">
+                        Идёт разбор файла, подождите...
+                    </div>
+                    <div id="error-responsible" class="err-msg mt-2" style="display:none"></div>
+                </form>
+
+                <hr class="my-3">
+                
+                <div class="block-title" style="font-size: 0.9em;">Как это работает:</div>
+                <div class="hint" style="font-size: 0.85rem;">
+                    <ul class="mb-0 ps-3">
+                        <li>Скачайте шаблон — архив с файлом на каждый цех (колонки: "Цех", "Таб", "ФИО", "Отметка").</li>
+                        <li>Проставьте отметки и загрузите обратно. Можно .zip архивом целиком, можно отдельным .xlsx по одному цеху.</li>
+                        <li>Отметка проставится вместе с текущим временем. Способ голосования и обычная явка при этом не меняются.</li>
+                        <li>Если отметка уже стояла, при повторном скачивании шаблона в колонке будет отображаться "+".</li>
+                    </ul>
+                </div>
             </div>
         </div>
     </div>
-
-    {# ========================================================================= #}
-    {# БЛОК 2: Загрузка сводной таблицы выборов (отчет штабу) #}
-    {# ========================================================================= #}
-    {% comment %} <div class="col-md-6">
-        <div class="card-block h-100">
-            <div class="block-title mb-3">2. Загрузка выборов способа голосования</div>
-            
-            <form method="post" action="{% url 'upload_voting_choices' %}" enctype="multipart/form-data"
-                  onsubmit="return checkFile('file-choices', 'btn-choices', 'error-choices', 'progress-choices')">
-                {% csrf_token %}
-                <div class="file-row mb-2">
-                    <input type="file" name="file" id="file-choices" accept=".xlsx" class="form-control form-control-sm">
-                    <button class="btn-orange ms-2" type="submit" id="btn-choices">Загрузить</button>
-                </div>
-                
-                <div class="fmt-line mb-2">
-                    <span class="fmt-badge">XLSX</span>
-                    <span>Формат: «Сводная таблица для отчета штабу по голосованию».</span>
-                </div>
-                
-                <div id="progress-choices" class="hint text-primary" style="display:none">
-                    Идёт разбор файла и обновление способов, подождите...
-                </div>
-                <div id="error-choices" class="err-msg mt-2" style="display:none"></div>
-            </form>
-
-            <hr class="my-3">
-            
-            <div class="block-title" style="font-size: 0.9em;">Как это работает:</div>
-            <div class="hint" style="font-size: 0.85em;">
-                <ul class="mb-0 ps-3">
-                    <li>Система ищет колонки: <b>Таб.№</b>, <b>ФИО</b> и 4 колонки способов голосования.</li>
-                    <li>Если в колонке способа стоит цифра <b>«1»</b>, этот способ назначается сотруднику.</li>
-                    <li>Обновляется <b>только</b> поле «Способ голосования». Остальные данные (адрес, УИК и т.д.) не меняются.</li>
-                </ul>
-            </div>
-        </div>
-    </div> {% endcomment %}
-
-    {# ========================================================================= #}
-    {# БЛОК 3: #}
-    {# ========================================================================= #}
-    <div class="col-md-6">
-        <div class="card-block h-100">
-            <div class="block-title mb-3">2. Загрузка сводного отчёта (обновление меток)</div>
-            
-            <form method="post" action="{% url 'upload_custom_report' %}" enctype="multipart/form-data"
-                  onsubmit="return checkFile('file-custom', 'btn-custom', 'error-custom', 'progress-custom')">
-                {% csrf_token %}
-                <div class="file-row mb-2">
-                    <input type="file" name="file" id="file-custom" accept=".zip,.xlsx" class="form-control form-control-sm">
-                    <button class="btn-orange ms-2" type="submit" id="btn-custom">Загрузить</button>
-                </div>
-                
-                <div class="fmt-line mb-2">
-                    <span class="fmt-badge">.ZIP / .XLSX</span>
-                    <span>Формат: архив или файл.</span>
-                </div>
-                
-                <div id="progress-custom" class="hint text-primary" style="display:none">
-                    Идёт разбор файла и обновление меток, подождите...
-                </div>
-                <div id="error-custom" class="err-msg mt-2" style="display:none"></div>
-            </form>
-
-            <hr class="my-3">
-            
-            <div class="block-title" style="font-size: 0.9em;">Что обновляется по отметкам "+", "1", "да", "true", "v" :</div>
-            <div class="hint" style="font-size: 0.85em;">
-                <ul class="mb-0 ps-3">
-                    <li><b>Планирует:</b> обновляет способ голосования</li>
-                    <li><b>Проголосовал:</b> ставит явку  и место явки</li>
-                    <li><b>Зарегестрирован:</b> Зарегестрирован / Заявление оформлено</li>
-                    <li><b>Открепился:</b> ставит метку Открепился</li>
-                    <li><b>Уважительная причина:</b> ставит метку Уважительная причина</li>
-                </ul>
-            </div>
-        </div>
-    </div>
-
-    {# ========================================================================= #}
-    {# БЛОК 4: Загрузка отметок явки из файла штаба (с датой и временем) #}
-    {# ========================================================================= #}
-    <div class="col-md-6">
-        <div class="card-block h-100">
-            <div class="block-title mb-3">3. Загрузка отметок явки из файла штаба (с датой и временем)</div>
-            
-            <form method="post" action="{% url 'upload_turnout_hq' %}" enctype="multipart/form-data"
-                  onsubmit="return checkFile('file-turnout', 'btn-turnout', 'error-turnout', 'progress-turnout')">
-                {% csrf_token %}
-                <div class="file-row mb-2">
-                    <input type="file" name="file" id="file-turnout" accept=".zip" class="form-control form-control-sm">
-                    <button class="btn-orange ms-2" type="submit" id="btn-turnout">Загрузить</button>
-                </div>
-                
-                <div class="fmt-line mb-2">
-                    <span class="fmt-badge">.ZIP</span>
-                    <span>Формат: ZIP-архив, внутри которого лежат файлы .xlsx с отчётом штаба</span>
-                </div>
-                
-                <div id="progress-turnout" class="hint text-primary" style="display:none">
-                    Идёт разбор файла и простановка явки, подождите...
-                </div>
-                <div id="error-turnout" class="err-msg mt-2" style="display:none"></div>
-            </form>
-
-            <hr class="my-3">
-            
-            <div class="block-title" style="font-size: 0.9em;">Требования к файлу:</div>
-            <div class="hint" style="font-size: 0.85em;">
-                <ul class="mb-0 ps-3">
-                    <li><b>1-я колонка (A):</b> Табельный номер</li>
-                    <li><b>4-я колонка (D):</b> Дата голосования</li>
-                    <li><b>5-я колонка (E):</b> Время голосования</li>
-                    <li class="text-danger"><b>Важно:</b> Явка проставляется <u>только</u> тем сотрудникам, которым ранее был назначен способ голосования. Строкам без назначенного способа будет проставлено УИК.</li>
-                </ul>
-            </div>
-        </div>
-    </div>
-    {# ========================================================================= #}
-    {# БЛОК 5: Отметка о голосовании через ответственного #}
-    {# ========================================================================= #}
-    <div class="col-md-6">
-        <div class="card-block h-100">
-            <div class="block-title mb-3">4. Голосование через ответственного</div>
-
-            <div class="mb-3">
-                <a class="btn-ghost" href="{% url 'export_responsible_template' %}">
-                    Скачать шаблон (архив по цехам)
-                </a>
-            </div>
-            
-            <form method="post" action="{% url 'upload_responsible_marks' %}" enctype="multipart/form-data"
-                  onsubmit="return checkFile('file-responsible', 'btn-responsible', 'error-responsible', 'progress-responsible')">
-                {% csrf_token %}
-                <div class="file-row mb-2">
-                    <input type="file" name="file" id="file-responsible" accept=".zip,.xlsx" class="form-control form-control-sm">
-                    <button class="btn-orange ms-2" type="submit" id="btn-responsible">Загрузить</button>
-                </div>
-                
-                <div class="fmt-line mb-2">
-                    <span class="fmt-badge">.ZIP / .XLSX</span>
-                    <span>Формат: Цех | Таб | ФИО | Отметка (любой символ, кроме пробела).</span>
-                </div>
-                
-                <div id="progress-responsible" class="hint text-primary" style="display:none">
-                    Идёт разбор файла, подождите...
-                </div>
-                <div id="error-responsible" class="err-msg mt-2" style="display:none"></div>
-            </form>
-
-            <hr class="my-3">
-            
-            <div class="block-title" style="font-size: 0.9em;">Как это работает:</div>
-            <div class="hint" style="font-size: 0.85rem;">
-                <ul class="mb-0 ps-3">
-                    <li>Скачайте шаблон - архив с файлом на каждый цех: колонки "Цех", "Таб", "ФИО", "Отметка".</li>
-                    <li>Проставьте и загрузите обратно - можно .zip архивом целиком, можно отдельный .xlsx по одному цеху.</li>
-                    <li>Отметка проставится вместе с текущим временем. Способ голосования и обычная явка при этом не меняются.</li>
-                    <li>Если отметка уже стояла - при повторном скачивании шаблона в колонке будет "+".</li>
-                </ul>
-            </div>
-        </div>
-    </div>
-</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 /**
  * Универсальная клиентская проверка файла перед отправкой формы.
+ * 
  * @param {string} inputId - ID поля input type="file"
  * @param {string} btnId - ID кнопки отправки
  * @param {string} errorId - ID блока для вывода ошибки
  * @param {string} progressId - ID блока индикатора загрузки
+ * @param {string[]} allowedExts - Массив разрешенных расширений (например, ['.xlsx'] или ['.zip', '.xlsx'])
+ * @returns {boolean} - true, если валидация пройдена; false, если есть ошибка.
  */
-function checkFile(inputId, btnId, errorId, progressId) {
+function checkFile(inputId, btnId, errorId, progressId, allowedExts) {
     var input = document.getElementById(inputId);
     var err = document.getElementById(errorId);
 
@@ -239,51 +207,23 @@ function checkFile(inputId, btnId, errorId, progressId) {
         return false;
     }
 
-    // Файл не выбран
+    // 1. Проверка: файл не выбран
     if (!input.files || !input.files.length) {
-        return fail('Файл не прикреплён — выберите .zip перед загрузкой');
+        return fail('Файл не прикреплён.');
     }
 
-    // Проверка расширения
-    var name = input.files[0].name;
-    if (!name.toLowerCase().endsWith('.zip')) {
-        var ext = name.indexOf('.') >= 0 ? name.slice(name.lastIndexOf('.')) : 'без расширения';
-        return fail('Это ' + ext + ', а нужен .zip архив.');
-    }
-
-    // Всё в порядке: скрываем ошибку, блокируем кнопку, показываем прогресс
-    err.style.display = 'none';
-    var btn = document.getElementById(btnId);
-    btn.disabled = true;
-    btn.textContent = 'Обработка...';
-    document.getElementById(progressId).style.display = 'block';
-    
-    return true; // Разрешаем отправку формы
-
-
-function checkFileCustom(inputId, btnId, errorId, progressId) {
-    var input = document.getElementById(inputId);
-    var err = document.getElementById(errorId);
-
-    function fail(text) {
-        err.textContent = text;
-        err.style.display = 'block';
-        return false;
-    }
-
-    // Файл не выбран
-    if (!input.files || !input.files.length) {
-        return fail('Файл не прикреплён — выберите .zip перед загрузкой');
-    }
-
-    // Проверка расширения
+    // 2. Проверка: расширение файла
     var name = input.files[0].name.toLowerCase();
-    if (!name.endsWith('.zip') && !name.endsWith('.xlsx')) {
+    var isValid = allowedExts.some(function(ext) {
+        return name.endsWith(ext);
+    });
+
+    if (!isValid) {
         var ext = name.indexOf('.') >= 0 ? name.slice(name.lastIndexOf('.')) : 'без расширения';
-        return fail('Нужен формат .zip или .xlsx, а получен' + ext);
+        return fail('Неподдерживаемый формат: ' + ext + '. Разрешены: ' + allowedExts.join(', '));
     }
 
-    // Всё в порядке: скрываем ошибку, блокируем кнопку, показываем прогресс
+    // 3. Всё в порядке: скрываем ошибку, блокируем кнопку, показываем прогресс
     err.style.display = 'none';
     var btn = document.getElementById(btnId);
     btn.disabled = true;

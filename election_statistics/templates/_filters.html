@@ -48,6 +48,14 @@
             {# Режим с явкой (страница "Голосование"): фильтры по явке и фактическому месту #}
             {% if with_status %}
             <div class="filter-group">
+                <label class="filter-label">Способ</label>
+                <select class="filter-select" name="method">
+                    <option value="">Все</option>
+                    <option value="none" {% if f.method == 'none' %}selected{% endif %}>Не назначен</option>
+                    {% for code, label in methods %}<option value="{{ code }}" {% if f.method == code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="filter-group">
                 <label class="filter-label">Явка</label>
                 <select class="filter-select" name="voted">
                     <option value="">Все</option>
