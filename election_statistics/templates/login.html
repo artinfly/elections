@@ -4,48 +4,52 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Вход — Выборы</title>
-    {# Стили: базовый Bootstrap + собственные стили страницы входа #}
+    <title>Вход — Учёт голосования</title>
+    
+    {# === СТИЛИ === #}
     <link rel="stylesheet" href="{% static 'vendor/bootstrap.min.css' %}">
     <link rel="stylesheet" href="{% static 'css/style.css' %}">
 </head>
-{# Отдельная страница без общего каркаса (сайдбар не нужен анониму) #}
+
+{# Отдельная страница без общего каркаса (сайдбар не нужен анонимному пользователю) #}
 <body class="login-page">
-<div class="login-wrap">
-    <div class="login-box">
-        {# Шапка карточки: логотип и заголовок #}
-        <div class="login-top">
-            <div class="login-icon">
-                <svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>
-            </div>
-            <div class="login-title">
-                Выборы
-                <span>Введите учётные данные</span>
-            </div>
-        </div>
-        <div class="login-body">
-            {# Сообщение об ошибке показывается только после неудачной попытки входа #}
-            {% if error %}
-            <div class="login-error">Неверный логин или пароль</div>
-            {% endif %}
-            {% comment %} {# Форма логина: POST на этот же URL, обрабатывается login_view.
-              autocomplete-атрибуты позволяют браузеру безопасно подставлять пароли. #} {% endcomment %}
-            <form method="post">
-                {% csrf_token %}
-                <div class="mb-3">
-                    <label class="form-label">Логин</label>
-                    <input type="text" name="username" class="form-control" autofocus autocomplete="username">
+    <div class="login-wrap">
+        <div class="login-box">
+            
+            {# === ШАПКА КАРТОЧКИ === #}
+            <div class="login-top">
+                <div class="login-icon">
+                    <svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label">Пароль</label>
-                    <input type="password" name="password" class="form-control" autocomplete="current-password">
+                <div class="login-title">
+                    Выборы
+                    <span>Введите учётные данные</span>
                 </div>
-                <button type="submit" class="btn-login">Войти</button>
-            </form>
+            </div>
+            
+            {# === ТЕЛО ФОРМЫ === #}
+            <div class="login-body">
+                {% if error %}
+                    <div class="login-error">Неверный логин или пароль</div>
+                {% endif %}
+                
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label" for="username">Логин</label>
+                        <input type="text" name="username" id="username" class="form-control" autofocus autocomplete="username" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="password">Пароль</label>
+                        <input type="password" name="password" id="password" class="form-control" autocomplete="current-password" required>
+                    </div>
+                    <button type="submit" class="btn-login">Войти</button>
+                </form>
+            </div>
+            
+            {# === ПОДВАЛ КАРТОЧКИ === #}
+            <div class="login-footer">учёт голосования</div>
         </div>
-        {# Подпись внизу карточки #}
-        <div class="login-footer">учёт голосования</div>
     </div>
-</div>
 </body>
 </html>

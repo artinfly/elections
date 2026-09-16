@@ -3,190 +3,199 @@
 {% block title %}Способ голосования{% endblock %}
 
 {% block content %}
-{# ========================================================================== #}
-{# Шапка страницы: заголовок и индикатор количества найденных сотрудников     #}
-{# ========================================================================== #}
-<div class="page-header">
-    <h5>Способ голосования</h5>
-    <span class="row-count-label">Найдено: {{ found }}</span>
-</div>
+    {# ========================================================================== #}
+    {# ШАПКА СТРАНИЦЫ                                                             #}
+    {# ========================================================================== #}
+    <div class="page-header">
+        <h5>Способ голосования</h5>
+        <span class="row-count-label">Найдено: {{ found }}</span>
+    </div>
 
-{# ========================================================================== #}
-{# Карточки-счётчики (дашборд)                                                #}
-{# Значения берутся из counts.method (план). Обновляются через JS без         #}
-{# перезагрузки страницы после каждого изменения способа.                     #}
-{# Порядок карточек в DOM строго соответствует индексам в JS (0..5).          #}
-{# ========================================================================== #}
-<div class="dash-row mb-4">
-    {# 0: ДЭГ #}
-    <div>
-        <div class="dash-card">
-            <div class="dash-card-icon" style="background:rgba(37,99,235,.12);color:#2563eb">Д</div>
-            <div>
-                <div class="dash-card-num">{{ counts.method.deg }}</div>
-                <div class="dash-card-lbl">ДЭГ</div>
+    {# ========================================================================== #}
+    {# ДАШБОРД: КАРТОЧКИ-СЧЁТЧИКИ                                                 #}
+    {# Значения берутся из counts.method (план). Обновляются через JS без         #}
+    {# перезагрузки страницы. Порядок карточек в DOM строго соответствует          #}
+    {# индексам в JS-массиве (0..5).                                              #}
+    {# ========================================================================== #}
+    <div class="dash-row mb-4">
+        {# 0: ДЭГ #}
+        <div>
+            <div class="dash-card">
+                <div class="dash-card-icon" style="background:rgba(37,99,235,.12);color:#2563eb">Д</div>
+                <div>
+                    <div class="dash-card-num">{{ counts.method.deg }}</div>
+                    <div class="dash-card-lbl">ДЭГ</div>
+                </div>
+            </div>
+        </div>
+        
+        {# 1: УИК (интерактивная карточка, открывает модалку с разбивкой по участкам) #}
+        <div>
+            <button type="button" class="dash-card dash-card-action" id="uik-card" title="Показать распределение по участкам">
+                <div class="dash-card-icon" style="background:rgba(42,120,214,.12);color:#2a78d6">У</div>
+                <div>
+                    <div class="dash-card-num">{{ counts.method.uik }}</div>
+                    <div class="dash-card-lbl">УИК<span class="dash-card-more">по участкам</span></div>
+                </div>
+            </button>
+        </div>
+        
+        {# 2: УИК-УВЗ #}
+        <div>
+            <div class="dash-card">
+                <div class="dash-card-icon" style="background:rgba(235,104,52,.12);color:#eb6834">В</div>
+                <div>
+                    <div class="dash-card-num">{{ counts.method.uvz }}</div>
+                    <div class="dash-card-lbl">УИК-УВЗ</div>
+                </div>
+            </div>
+        </div>
+        
+        {# 3: УИК-19 #}
+        <div>
+            <div class="dash-card">
+                <div class="dash-card-icon" style="background:rgba(124,58,237,.12);color:#7c3aed">19</div>
+                <div>
+                    <div class="dash-card-num">{{ counts.method.u19 }}</div>
+                    <div class="dash-card-lbl">УИК-19</div>
+                </div>
+            </div>
+        </div>
+        
+        {# 4: Способ не назначен #}
+        <div>
+            <div class="dash-card">
+                <div class="dash-card-icon" style="background:rgba(136,136,136,.12);color:#888">—</div>
+                <div>
+                    <div class="dash-card-num">{{ counts.method.none }}</div>
+                    <div class="dash-card-lbl">Не назначен</div>
+                </div>
+            </div>
+        </div>
+        
+        {# 5: Всего сотрудников в текущей выборке #}
+        <div>
+            <div class="dash-card">
+                <div class="dash-card-icon" style="background:rgba(224,123,42,.12);color:#e07b2a">Σ</div>
+                <div>
+                    <div class="dash-card-num">{{ counts.method.total }}</div>
+                    <div class="dash-card-lbl">Всего</div>
+                </div>
             </div>
         </div>
     </div>
-    
-    {# 1: УИК (интерактивная карточка, открывает модалку с разбивкой по участкам) #}
-    <div>
-        <button type="button" class="dash-card dash-card-action" id="uik-card"
-                title="Показать распределение по участкам">
-            <div class="dash-card-icon" style="background:rgba(42,120,214,.12);color:#2a78d6">У</div>
-            <div>
-                <div class="dash-card-num">{{ counts.method.uik }}</div>
-                <div class="dash-card-lbl">УИК<span class="dash-card-more">по участкам</span></div>
-            </div>
-        </button>
-    </div>
-    
-    {# 2: УИК-УВЗ #}
-    <div>
-        <div class="dash-card">
-            <div class="dash-card-icon" style="background:rgba(235,104,52,.12);color:#eb6834">В</div>
-            <div>
-                <div class="dash-card-num">{{ counts.method.uvz }}</div>
-                <div class="dash-card-lbl">УИК-УВЗ</div>
-            </div>
-        </div>
-    </div>
-    
-    {# 3: УИК-19 #}
-    <div>
-        <div class="dash-card">
-            <div class="dash-card-icon" style="background:rgba(124,58,237,.12);color:#7c3aed">19</div>
-            <div>
-                <div class="dash-card-num">{{ counts.method.u19 }}</div>
-                <div class="dash-card-lbl">УИК-19</div>
-            </div>
-        </div>
-    </div>
-    
-    {# 4: Способ не назначен #}
-    <div>
-        <div class="dash-card">
-            <div class="dash-card-icon" style="background:rgba(136,136,136,.12);color:#888">—</div>
-            <div>
-                <div class="dash-card-num">{{ counts.method.none }}</div>
-                <div class="dash-card-lbl">Не назначен</div>
-            </div>
-        </div>
-    </div>
-    
-    {# 5: Всего сотрудников в текущей выборке #}
-    <div>
-        <div class="dash-card">
-            <div class="dash-card-icon" style="background:rgba(224,123,42,.12);color:#e07b2a">Σ</div>
-            <div>
-                <div class="dash-card-num">{{ counts.method.total }}</div>
-                <div class="dash-card-lbl">Всего</div>
-            </div>
-        </div>
-    </div>
-</div>
 
-{# ========================================================================== #}
-{# Панель фильтров (подключается из общего шаблона)                           #}
-{# ========================================================================== #}
-{% include "_filters.html" %}
+    {# ========================================================================== #}
+    {# ПАНЕЛЬ ФИЛЬТРОВ                                                            #}
+    {# ========================================================================== #}
+    {% include "_filters.html" %}
 
-{# ========================================================================== #}
-{# Таблица сотрудников                                                        #}
-{# В заголовке 9 колонок. В теле строки должно быть ровно 9 ячеек <td>.       #}
-{# ========================================================================== #}
-<div class="table-container">
-    <table class="report-table">
-        <thead>
-            <tr>
-                <th>Цех</th>
-                <th>Таб№</th>
-                <th>ФИО</th>
-                <th class="col-absence">Отсутствие</th>
-                <th class="col-mark">Регистрация на УИК-УВЗ</th>
-                <th class="col-mark">Регистрация на ДЭГ</th>
-                <th>Округ</th>
-                <th>УИК</th>
-                <th class="col-method">Способ</th>
-            </tr>
-        </thead>
-        <tbody>
-        {% for r in rows %}
-            <tr>
-                {# 1. Цех #}
-                <td>{{ r.department }}</td>
-                {# 2. Табельный номер #}
-                <td>{{ r.tab_number }}</td>
-                {# 3. ФИО #}
-                <td class="wrap">{{ r.fio }}</td>
-                
-                {# 4. Отсутствие по УП (асинхронная кнопка) #}
-                <td class="col-absence">
-                    <button type="button" class="btn-mark absence-btn {% if r.absence %}on{% endif %}"
-                            data-id="{{ r.id }}"
-                            data-on-label="Уважительная причина" data-off-label="Отметить Уваж.Прич.">
-                        {% if r.absence %}Уважительная причина{% else %}Отметить Уваж.Прич.{% endif %}
-                    </button>
-                </td>
-                
-                {# 5. Регистрация на УИК-УВЗ (активна только если выбран способ УВЗ) #}
-                <td class="col-mark">
-                    {% if r.method == "uvz" %}
-                    <button type="button" class="btn-mark {% if r.mark_uvz %}on{% endif %}"
-                            data-id="{{ r.id }}" data-field="mark_uvz"
-                            data-on-label="Заявление оформлено" data-off-label="Оформить заявление">
-                        {% if r.mark_uvz %}Заявление оформлено{% else %}Оформить заявление{% endif %}
-                    </button>
-                    {% else %}
-                    <button type="button" class="btn-mark btn-mark-off"
-                            data-alert="У сотрудника способ голосования - не УИК-УВЗ, отметка недоступна.">
-                        Оформить заявление
-                    </button>
-                    {% endif %}
-                </td>
-                
-                {# 6. Регистрация на ДЭГ (активна только если выбран способ ДЭГ) #}
-                <td class="col-mark">
-                    {% if r.method == "deg" %}
-                    <button type="button" class="btn-mark {% if r.mark_deg %}on{% endif %}"
-                            data-id="{{ r.id }}" data-field="mark_deg"
-                            data-on-label="Зарегистрирован" data-off-label="Зарегистрировать">
-                        {% if r.mark_deg %}Зарегистрирован{% else %}Зарегистрировать{% endif %}
-                    </button>
-                    {% else %}
-                    <button type="button" class="btn-mark btn-mark-off"
-                            data-alert="У сотрудника способ голосования - не ДЭГ, отметка недоступна.">
-                        Зарегистрировать
-                    </button>
-                    {% endif %}
-                </td>
-                
-                {# 7. Округ #}
-                <td>{{ r.okrug }}</td>
-                {# 8. Номер УИК #}
-                <td>{{ r.uik }}</td>
-                
-                {# 9. Сегмент-переключатель способа голосования #}
-                <td class="col-method">
-                    <span class="seg seg-method" data-id="{{ r.id }}">
-                        {% for code, label in methods %}
-                        <button type="button" data-m="{{ code }}" class="{% if r.method == code %}on{% endif %}">{{ label }}</button>
-                        {% endfor %}
-                    </span>
-                </td>
-            </tr>
-        {% empty %}
-            {# Заглушка для пустой выборки. colspan=9, так как в таблице 9 колонок #}
-            <tr><td colspan="9" class="text-center">Нет данных</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
-</div>
+    {# ========================================================================== #}
+    {# ТАБЛИЦА СОТРУДНИКОВ                                                        #}
+    {# В заголовке 9 колонок. В теле строки должно быть ровно 9 ячеек <td>.       #}
+    {# ========================================================================== #}
+    <div class="table-container">
+        <table class="report-table">
+            <thead>
+                <tr>
+                    <th>Цех</th>
+                    <th>Таб№</th>
+                    <th>ФИО</th>
+                    <th class="col-absence">Отсутствие</th>
+                    <th class="col-mark">Регистрация на УИК-УВЗ</th>
+                    <th class="col-mark">Регистрация на ДЭГ</th>
+                    <th>Округ</th>
+                    <th>УИК</th>
+                    <th class="col-method">Способ</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for r in rows %}
+                <tr>
+                    {# 1. Цех #}
+                    <td>{{ r.department }}</td>
+                    
+                    {# 2. Табельный номер #}
+                    <td>{{ r.tab_number }}</td>
+                    
+                    {# 3. ФИО #}
+                    <td class="wrap">{{ r.fio }}</td>
+                    
+                    {# 4. Отсутствие по УП (асинхронная кнопка) #}
+                    <td class="col-absence">
+                        <button type="button" class="btn-mark absence-btn {% if r.absence %}on{% endif %}"
+                                data-id="{{ r.id }}"
+                                data-on-label="Уважительная причина" 
+                                data-off-label="Отметить Уваж.Прич.">
+                            {% if r.absence %}Уважительная причина{% else %}Отметить Уваж.Прич.{% endif %}
+                        </button>
+                    </td>
+                    
+                    {# 5. Регистрация на УИК-УВЗ (активна только если выбран способ УВЗ) #}
+                    <td class="col-mark">
+                        {% if r.method == "uvz" %}
+                            <button type="button" class="btn-mark {% if r.mark_uvz %}on{% endif %}"
+                                    data-id="{{ r.id }}" 
+                                    data-field="mark_uvz"
+                                    data-on-label="Заявление оформлено" 
+                                    data-off-label="Оформить заявление">
+                                {% if r.mark_uvz %}Заявление оформлено{% else %}Оформить заявление{% endif %}
+                            </button>
+                        {% else %}
+                            <button type="button" class="btn-mark btn-mark-off"
+                                    data-alert="У сотрудника способ голосования - не УИК-УВЗ, отметка недоступна.">
+                                Оформить заявление
+                            </button>
+                        {% endif %}
+                    </td>
+                    
+                    {# 6. Регистрация на ДЭГ (активна только если выбран способ ДЭГ) #}
+                    <td class="col-mark">
+                        {% if r.method == "deg" %}
+                            <button type="button" class="btn-mark {% if r.mark_deg %}on{% endif %}"
+                                    data-id="{{ r.id }}" 
+                                    data-field="mark_deg"
+                                    data-on-label="Зарегистрирован" 
+                                    data-off-label="Зарегистрировать">
+                                {% if r.mark_deg %}Зарегистрирован{% else %}Зарегистрировать{% endif %}
+                            </button>
+                        {% else %}
+                            <button type="button" class="btn-mark btn-mark-off"
+                                    data-alert="У сотрудника способ голосования - не ДЭГ, отметка недоступна.">
+                                Зарегистрировать
+                            </button>
+                        {% endif %}
+                    </td>
+                    
+                    {# 7. Округ #}
+                    <td>{{ r.okrug }}</td>
+                    
+                    {# 8. Номер УИК #}
+                    <td>{{ r.uik }}</td>
+                    
+                    {# 9. Сегмент-переключатель способа голосования #}
+                    <td class="col-method">
+                        <span class="seg seg-method" data-id="{{ r.id }}">
+                            {% for code, label in methods %}
+                                <button type="button" data-m="{{ code }}" class="{% if r.method == code %}on{% endif %}">{{ label }}</button>
+                            {% endfor %}
+                        </span>
+                    </td>
+                </tr>
+            {% empty %}
+                {# Заглушка для пустой выборки. colspan=9, так как в таблице 9 колонок #}
+                <tr>
+                    <td colspan="9" class="text-center">Нет данных</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
 
-{# ========================================================================== #}
-{# Пагинация (подключается из общего шаблона)                                 #}
-{# ========================================================================== #}
-{% include "_pagination.html" %}
+    {# ========================================================================== #}
+    {# ПАГИНАЦИЯ                                                                  #}
+    {# ========================================================================== #}
+    {% include "_pagination.html" %}
 {% endblock %}
 
 {% block scripts %}
@@ -195,7 +204,7 @@
     const canEdit = {% if can_edit %}true{% else %}false{% endif %};
 
     // ========================================================================
-    // Обработчик переключателей способа голосования (сегменты в последней колонке)
+    // 1. Обработчик переключателей способа голосования (сегменты в последней колонке)
     // ========================================================================
     document.querySelectorAll('.seg-method').forEach(function (seg) {
         seg.addEventListener('click', function (e) {
@@ -204,33 +213,36 @@
             var btn = e.target.closest('button');
             if (!btn) return;
             
-            // Если кнопка уже активна (on), клик по ней сбрасывает способ (method='').
-            // Иначе назначает выбранный способ.
             var isOn = btn.classList.contains('on');
             
             postJSON('/api/method/', {
                 id: seg.dataset.id,
                 method: isOn ? '' : btn.dataset.m
             }).then(function (c) {
-                // Снимаем выделение со всех кнопок в текущем сегменте.
-                seg.querySelectorAll('button').forEach(function (b) { b.classList.remove('on'); });
-                // Если способ был назначен, выделяем активную кнопку.
-                if (!isOn) btn.classList.add('on');
+                // Снимаем выделение со всех кнопок в текущем сегменте
+                seg.querySelectorAll('button').forEach(function (b) { 
+                    b.classList.remove('on'); 
+                });
                 
-                // Обновляем карточки-счётчики сверху (индексы строго соответствуют DOM).
+                // Если способ был назначен, выделяем активную кнопку
+                if (!isOn) {
+                    btn.classList.add('on');
+                }
+                
+                // Обновляем карточки-счётчики сверху (индексы 0..5 строго соответствуют порядку в DOM)
                 var n = document.querySelectorAll('.dash-card-num');
                 n[0].textContent = c.method.deg;
                 n[1].textContent = c.method.uik;
                 n[2].textContent = c.method.uvz;
                 n[3].textContent = c.method.u19;
                 n[4].textContent = c.method.none;
-                n[5].textContent = c.method.total; // Обновление общего счетчика
+                n[5].textContent = c.method.total;
             });
         });
     });
 
     // ========================================================================
-    // Обработчик кнопок регистрации (УИК-УВЗ и ДЭГ)
+    // 2. Обработчик кнопок регистрации (УИК-УВЗ и ДЭГ)
     // Исключаем .absence-btn, так как у неё отдельный эндпоинт и логика.
     // ========================================================================
     document.querySelectorAll('.btn-mark:not(.absence-btn)').forEach(function (btn) {
@@ -251,7 +263,7 @@
                 field: btn.dataset.field,
                 value: !isOn
             }).then(function () {
-                // Инвертируем визуальное состояние и текст кнопки.
+                // Инвертируем визуальное состояние и текст кнопки
                 btn.classList.toggle('on', !isOn);
                 btn.textContent = !isOn ? btn.dataset.onLabel : btn.dataset.offLabel;
             });
@@ -259,18 +271,17 @@
     });
 
     // ========================================================================
-    // Обработчик кнопки «Отсутствие по УП»
+    // 3. Обработчик кнопки «Отсутствие по УП»
     // Отправляет запрос на отдельный эндпоинт, который инвертирует булево поле.
     // ========================================================================
     document.querySelectorAll('.absence-btn').forEach(function (btn) {
         btn.addEventListener('click', function () {
             if (!canEdit) return;
             
-            // URL формируется динамически на основе data-id сотрудника.
             var url = '/api/toggle-absence/' + btn.dataset.id + '/';
             
             postJSON(url, {}).then(function (data) {
-                // Сервер возвращает актуальное значение absence.
+                // Сервер возвращает актуальное значение absence
                 btn.classList.toggle('on', data.absence);
                 btn.textContent = data.absence ? btn.dataset.onLabel : btn.dataset.offLabel;
             });

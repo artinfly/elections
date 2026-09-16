@@ -42,15 +42,29 @@ urlpatterns = [
         views.upload_voting_choices,
         name="upload_voting_choices",
     ),
-    path("upload-turnout-hq/", views.upload_turnout_hq, name="upload_turnout_hq"),
+    # Импорт явки из ZIP-архива отчётов штаба с датой и временем голосования.
+    path("upload/turnout-hq/", views.upload_turnout_hq, name="upload_turnout_hq"),
+    # Импорт данных из кастомного сводного отчёта (Excel или ZIP с Excel).
     path(
-        "upload-custom-report/", views.upload_custom_report, name="upload_custom_report"
+        "upload/custom-report/", views.upload_custom_report, name="upload_custom_report"
+    ),
+    # Импорт отметок «Голосование через ответственного» из Excel или ZIP.
+    path(
+        "upload/responsible/",
+        views.upload_responsible_marks,
+        name="upload_responsible_marks",
     ),
     # ==============================================================================
     # Экспорт отчетов в Excel и ZIP (скачивание файлов)
     # ==============================================================================
     # Выгрузка полного списка всех сотрудников со всеми данными.
     path("export/employees/", views.export_employees, name="export_employees"),
+    # Шаблон Excel для заполнения отметок «Голосование через ответственного».
+    path(
+        "export/responsible-template/",
+        views.export_responsible_template,
+        name="export_responsible_template",
+    ),
     # Сводная таблица по цехам (план голосования и явка).
     path("export/summary/", views.export_summary, name="export_summary"),
     # Сводная таблица по цехам, исключая сотрудников 19-го округа.
@@ -102,8 +116,7 @@ urlpatterns = [
     path("api/bulk-voted/", views.api_bulk_voted, name="api_bulk_voted"),
     # Получение статистики по УИКам для модального окна.
     path("api/uik-stats/", views.api_uik_stats, name="api_uik_stats"),
-    # Переключение отметки «Отсутствие по УП» для кнопки на странице способа.
-    # Путь изменен на api/ для соответствия общим правилам проекта.
+    # Переключение отметки «Отсутствие по УП» для конкретного сотрудника.
     path(
         "api/toggle-absence/<int:employee_id>/",
         views.api_toggle_absence,
