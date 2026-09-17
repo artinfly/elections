@@ -8,7 +8,7 @@
     {# ========================================================================== #}
     <div class="page-header">
         <h5>Голосование</h5>
-        <span class="row-count-label">Найдено: {{ found }}</span>
+        <span class="row-count-label" id="found-count">Найдено: {{ found }}</span>
     </div>
 
     {# ========================================================================== #}
@@ -16,7 +16,7 @@
     {# ВАЖНО: Порядок .dash-card-num в DOM строго соответствует индексам в JS:    #}
     {# 0=ДЭГ, 1=УИК, 2=УВЗ, 3=УИК-19, 4=ИТОГО, 5=Пусто УИК.                       #}
     {# ========================================================================== #}
-    <div class="dash-row mb-4">
+    <div class="dash-row mb-4" id="dash-row">
         {# 0: Проголосовали через ДЭГ #}
         <div>
             <div class="dash-card">
@@ -92,12 +92,12 @@
     {# ========================================================================== #}
     {# БЛОК МАССОВЫХ ДЕЙСТВИЙ                                                     #}
     {# ========================================================================== #}
-    {% if not is_uik_uvz_viewer %}
+    {% if user.is_superuser %}
     <div class="card-block mb-3">
         <div class="d-flex flex-wrap gap-2 align-items-center">
             <button class="btn-orange" type="button" id="bulk-on">Отметить всех отфильтрованных</button>
             <button class="btn-ghost" type="button" id="bulk-off">Снять отметку</button>
-            <span class="row-count-label">будет затронуто записей: {{ found }}</span>
+            <span class="row-count-label" id="bulk-count">будет затронуто записей: {{ found }}</span>
         </div>
         {# Контейнер для сообщения с итогом массовой операции #}
         <div class="ok-msg" id="bulk-msg" style="display:none" role="status"></div>
@@ -108,6 +108,7 @@
     {# ТАБЛИЦА СОТРУДНИКОВ                                                        #}
     {# В заголовке 7 колонок. В теле строки должно быть ровно 7 ячеек <td>.       #}
     {# ========================================================================== #}
+    <div id="results-table">
     <div class="table-container">
         <table class="report-table">
             <thead>
@@ -163,19 +164,13 @@
     {# ПАГИНАЦИЯ СПИСКА                                                           #}
     {# ========================================================================== #}
     {% include "_pagination.html" %}
+    </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    // Флаг прав доступа: если пользователь в группе viewer, редактирование блокируется.
     const canEdit = {% if can_edit %}true{% else %}false{% endif %};
-    
-    // Текущий размер выборки (подставляется из контекста страницы).
-    const FOUND = {{ found }};
-    
-    // Порог, после которого массовая операция требует подтверждения.
     const BULK_LIMIT = 100;
-
     // ========================================================================
     // 1. Вспомогательная функция: сбор текущих фильтров из URL
     // ========================================================================
@@ -193,7 +188,6 @@
         }
         return filters;
     }
-
     // ========================================================================
     // 2. Обновление карточек-счётчиков (дашборда)
     // ========================================================================
@@ -208,7 +202,6 @@
         n[4].textContent = c.voted.total;
         n[5].textContent = c.no_uik;
     }
-
     // ========================================================================
     // 3. Перерисовка строки таблицы
     // ========================================================================
@@ -216,32 +209,27 @@
     function paint(row, voted) {
         const btn = row.querySelector('.vote-btn');
         if (!btn) return; // Защита от отсутствия кнопки в строке
-        
         btn.classList.toggle('on', voted);
         btn.textContent = voted ? 'Проголосовал' : 'Не голосовал';
-        
         const place = row.querySelector('.place-badge');
         // Если явка отмечена, показываем запланированный способ (из data-plan).
         place.textContent = voted ? btn.dataset.plan : '';
         place.hidden = !place.textContent;
     }
-
     // ========================================================================
     // 4. Одиночная отметка явки (клик по кнопке в строке)
     // ========================================================================
+    function bindTableEvents() {
     document.querySelectorAll('.vote-btn').forEach(function (btn) {
         btn.addEventListener('click', function () {
             if (!canEdit) return; 
-            
             const row = btn.closest('tr');
             const voted = !btn.classList.contains('on');
-            
             // Бизнес-правило: нельзя отметить явку, если не выбран способ голосования.
             if (voted && !btn.dataset.plan) {
                 alert('Сначала выберите способ голосования на странице "Способ голосования".');
                 return;
             }
-            
             postJSON('/api/voted/', {
                 id: btn.dataset.id, 
                 voted: voted,
@@ -252,7 +240,14 @@
             });
         });
     });
-
+    }
+    bindTableEvents();
+    
+    document.body.addEventListener('htmx:aferSwap', function (evt) {
+        if (evt.detail.target && evt.detail.target.id === 'results-table') {
+            bindTableEvents();
+        }
+    });
     // ========================================================================
     // 5. Массовая отметка/снятие явки
     // ========================================================================
@@ -267,7 +262,6 @@
                 return;
             }
         }
-        
         postJSON('/api/bulk-voted/', {
             voted: voted,
             filters: getFilters() // КРИТИЧНО: передаем фильтры, чтобы сервер не трогал всю базу
@@ -281,7 +275,6 @@
                 msg.textContent += '. Пропущено без способа голосования: ' + c.skipped;
             }
             msg.style.display = 'block';
-            
             // Перерисовываем видимые строки на текущей странице пагинации.
             document.querySelectorAll('.report-table tbody tr').forEach(function (row) {
                 const btn = row.querySelector('.vote-btn');
@@ -292,7 +285,6 @@
             });
         });
     }
-
     // Привязка обработчиков к кнопкам массовых действий.
     document.getElementById('bulk-on').addEventListener('click', function () { bulk(true); });
     document.getElementById('bulk-off').addEventListener('click', function () { bulk(false); });

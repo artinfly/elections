@@ -909,6 +909,16 @@ def export_custom_report(request: HttpRequest) -> HttpResponse:
     elif grouping == "production_without_depts":
         book = custom_production_summary(request.GET, include_depts=False)
         name = f"svodny_po_proizvodstvam_{moment_str}"
+    elif grouping == "people_compact":
+        book = custom_report(request.GET, short=True)
+        name = f"svodny_otchet_{moment_str}"
+    elif grouping == "production_with_depts_compact":
+        book = custom_production_summary(request.GET, include_depts=True, short=True)
+        name = f"svodny_po_proizvodstvam_s_cehami_{moment_str}"
+    elif grouping == "production_without_depts_compact":
+        book = custom_production_summary(request.GET, include_depts=False, short=True)
+        name = f"svodny_po_proizvodstvam_{moment_str}"
+        print('adasd')
     else:
         book = custom_report(request.GET)
         name = f"svodny_otchet_{moment_str}"

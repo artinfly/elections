@@ -182,7 +182,8 @@ def production_table() -> Any:
         .annotate(
             people=Count("id"),
             came=Count("id", filter=Q(voted=True)),
-            proxy=Count("id", filter=Q(voted=True, proxy_vote=True)),
+            # proxy=Count("id", filter=Q(voted=True, proxy_vote=True)),
+            proxy=Count("id", filter=Q(proxy_vote=True)),
         )
         .order_by()
     ):

@@ -51,7 +51,8 @@ CUSTOM_COLUMNS: list[tuple[str, str, Callable[[Employee], bool]]] = [
     (
         "ДЭГ",
         "Проголосовал (ответственный)",
-        lambda p: p.proxy_vote and p.voted_method == DEG,
+        # lambda p: p.proxy_vote and p.voted_method == DEG,
+        lambda p: p.proxy_vote and p.method == DEG,
     ),
     # Группа голосования на обычном участке
     ("На участке", "Планирует", lambda p: p.method == UIK),
@@ -63,7 +64,8 @@ CUSTOM_COLUMNS: list[tuple[str, str, Callable[[Employee], bool]]] = [
     (
         "На участке",
         "Проголосовал (ответственный)",
-        lambda p: p.proxy_vote and p.voted_method == UIK,
+        # lambda p: p.proxy_vote and p.voted_method == UIK,
+        lambda p: p.proxy_vote and p.method == UIK,
     ),
     # Группа голосования на участке УВЗ (на предприятии)
     ("На участке УВЗ", "Планирует", lambda p: p.method == UVZ),
@@ -76,7 +78,8 @@ CUSTOM_COLUMNS: list[tuple[str, str, Callable[[Employee], bool]]] = [
     (
         "На участке УВЗ",
         "Проголосовал (ответственный)",
-        lambda p: p.proxy_vote and p.voted_method == UVZ,
+        # lambda p: p.proxy_vote and p.voted_method == UVZ,
+        lambda p: p.proxy_vote and p.method == UVZ,
     ),
     # Группа 19-го округа
     ("УИК-19", "Планирует", lambda p: p.method == UIK19),
@@ -85,7 +88,8 @@ CUSTOM_COLUMNS: list[tuple[str, str, Callable[[Employee], bool]]] = [
     (
         "УИК-19",
         "Проголосовал (ответственный)",
-        lambda p: p.proxy_vote and p.voted_method == UIK19,
+        # lambda p: p.proxy_vote and p.voted_method == UIK19,
+        lambda p: p.proxy_vote and p.method == UIK19,
     ),
     # Одиночные колонки без группы (имя группы пустое).
     # "Не определился" — сотрудник не выбрал способ.
@@ -97,6 +101,55 @@ CUSTOM_COLUMNS: list[tuple[str, str, Callable[[Employee], bool]]] = [
     ),
     ("", "Уважительная причина", lambda p: p.absence),
 ]
+
+
+def _get_custom_columns(
+    short: bool = False, with_total: bool = True
+) -> list[tuple[str, str, Callable[[Employee], bool]]]:
+    """
+    Возвращает список колонок отчёта — полный или сокращённый.
+
+    Описание:
+        При short=True в каждой группе способов голосования остаётся только
+        по две подколонки:
+          - ДЭГ: "Зарегистрирован" и "Проголосовал (QR-код)";
+          - На участке: "Планирует" и "Проголосовал (QR-код)";
+          - На участке УВЗ: "Заявление оформил" и "Проголосовал (QR-код)";
+          - УИК-19: "Планирует" и "Проголосовал (QR-код)".
+        Одиночные колонки "Не определился" и "Уважительная причина" убираются.
+        Если with_total=True, вместо них добавляется колонка "Всего" —
+        предикат p.voted. Поскольку строка ИТОГО считает проценты через
+        _format_with_percent(значение, total_people), эта колонка
+        автоматически покажет процент проголосовавших от общего числа
+        сотрудников.
+
+    Аргументы:
+        short: включает сокращённый режим колонок (см. описание выше).
+        with_total: добавлять ли колонку "Всего" в сокращённом режиме.
+            Актуально только при short=True (например, не нужна в отчёте
+            "по людям", где нет итоговой строки с процентами по каждому
+            сотруднику).
+
+    Возвращает:
+        list: список кортежей (имя_группы, имя_подколонки, предикат).
+    """
+    if not short:
+        return CUSTOM_COLUMNS
+
+    allowed_subs_by_group = {
+        "ДЭГ": {"Зарегистрирован", "Проголосовал (QR-код)"},
+        "На участке": {"Планирует", "Проголосовал (QR-код)"},
+        "На участке УВЗ": {"Заявление оформил", "Проголосовал (QR-код)"},
+        "УИК-19": {"Планирует", "Проголосовал (QR-код)"},
+    }
+    columns = [
+        (group, sub, predicate)
+        for group, sub, predicate in CUSTOM_COLUMNS
+        if sub in allowed_subs_by_group.get(group, set())
+    ]
+    if with_total:
+        columns.append(("", "Всего", lambda p: p.voted))
+    return columns
 
 
 # ==============================================================================
@@ -163,9 +216,11 @@ def _custom_qs(params: dict) -> QuerySet:
     return qs
 
 
-def _custom_groups() -> list[tuple[str, list[tuple[str, Callable]]]]:
+def _custom_groups(
+    short: bool = False, with_total: bool = True
+) -> list[tuple[str, list[tuple[str, Callable]]]]:
     """
-    Группирует колонки из CUSTOM_COLUMNS по имени группы.
+    Группирует колонки из CUSTOM_COLUMNS (или сокращённого набора) по имени группы.
 
     Описание:
         Преобразует плоский список колонок в иерархическую структуру для отрисовки
@@ -177,11 +232,17 @@ def _custom_groups() -> list[tuple[str, list[tuple[str, Callable]]]]:
     отображать несколько одиночных колонок подряд (например, "Не определился"
     и "Уважительная причина").
 
+    Аргументы:
+        short: если True, используется сокращённый набор колонок из
+            _get_custom_columns (см. её описание).
+        with_total: добавлять ли колонку "Всего" в сокращённом режиме
+            (передаётся в _get_custom_columns).
+
     Возвращает:
         list: список кортежей (имя_группы, [(имя_подколонки, предикат), ...]).
     """
     groups = []
-    for group, sub, predicate in CUSTOM_COLUMNS:
+    for group, sub, predicate in _get_custom_columns(short, with_total):
         # Пустая группа означает одиночную колонку без общего заголовка.
         # Такие колонки не должны объединяться с другими пустыми группами.
         if not group:
@@ -196,7 +257,13 @@ def _custom_groups() -> list[tuple[str, list[tuple[str, Callable]]]]:
     return groups
 
 
-def _draw_custom_groups(sheet: Any, start_row: int, start_col: int) -> list[Callable]:
+def _draw_custom_groups(
+    sheet: Any,
+    start_row: int,
+    start_col: int,
+    short: bool = False,
+    with_total: bool = True,
+) -> list[Callable]:
     """
     Отрисовывает объединённые заголовки групп и подколонки в листе Excel.
 
@@ -209,6 +276,9 @@ def _draw_custom_groups(sheet: Any, start_row: int, start_col: int) -> list[Call
         sheet: объект листа openpyxl.
         start_row: номер строки, с которой начинается шапка.
         start_col: номер колонки, с которой начинается шапка.
+        short: если True, используется сокращённый набор колонок
+            (см. _get_custom_columns).
+        with_total: добавлять ли колонку "Всего" в сокращённом режиме.
 
     Возвращает:
         list: список предикатов в порядке их следования в колонках листа.
@@ -219,7 +289,7 @@ def _draw_custom_groups(sheet: Any, start_row: int, start_col: int) -> list[Call
     column = start_col
     predicates = []
 
-    for group, subs in _custom_groups():
+    for group, subs in _custom_groups(short, with_total):
         start, end = column, column + len(subs) - 1
 
         if group:
@@ -261,7 +331,7 @@ def _draw_custom_groups(sheet: Any, start_row: int, start_col: int) -> list[Call
 # ==============================================================================
 
 
-def custom_report(params: dict) -> Workbook:
+def custom_report(params: dict, short: bool = False) -> Workbook:
     """
     Генерирует сводный Excel-отчёт "По людям" на основе фильтров.
 
@@ -272,6 +342,11 @@ def custom_report(params: dict) -> Workbook:
 
     Аргументы:
         params: параметры фильтров конструктора.
+        short: если True, для каждого способа голосования оставляются только
+            две подколонки (см. _get_custom_columns), а колонки
+            "Не определился" и "Уважительная причина" убираются без замены —
+            колонка "Всего" в этом отчёте не нужна, так как у него нет
+            общей итоговой строки с процентами по каждому сотруднику.
 
     Возвращает:
         Workbook: книга openpyxl с готовым отчётом.
@@ -298,7 +373,10 @@ def custom_report(params: dict) -> Workbook:
         column += 1
 
     # Отрисовка динамических колонок и получение списка предикатов.
-    predicates = _draw_custom_groups(sheet, start_row=1, start_col=column)
+    # Колонка "Всего" в этом отчёте не нужна (with_total=False).
+    predicates = _draw_custom_groups(
+        sheet, start_row=1, start_col=column, short=short, with_total=False
+    )
 
     # Настройка ширины колонок.
     widths = (10, 8, 10, 42, 8) + (12,) * len(predicates)
@@ -343,7 +421,10 @@ def custom_report(params: dict) -> Workbook:
 
 
 def custom_production_summary(
-    params: dict, include_depts: bool = False, moment: Optional[datetime] = None
+    params: dict,
+    include_depts: bool = False,
+    moment: Optional[datetime] = None,
+    short: bool = False,
 ) -> Workbook:
     """
     Генерирует сводный отчёт с группировкой по производствам.
@@ -360,6 +441,11 @@ def custom_production_summary(
         params: параметры фильтров конструктора.
         include_depts: если True, выводит строки по цехам внутри каждого производства.
         moment: момент времени для заголовка отчёта.
+        short: если True, для каждого способа голосования оставляются только
+            подколонки "Планирует" и "Проголосовал (QR-код)", а колонки
+            "Не определился" и "Уважительная причина" заменяются одной
+            колонкой "Всего" — в строках "Итого"/"Всего по Обществу" она
+            покажет процент проголосовавших от общего числа сотрудников.
 
     Возвращает:
         Workbook: книга openpyxl со сводным отчётом.
@@ -381,7 +467,7 @@ def custom_production_summary(
 
     # Собираем плоский список всех предикатов для отчёта.
     predicates = []
-    for group, subs in _custom_groups():
+    for group, subs in _custom_groups(short):
         for sub, predicate in subs:
             predicates.append(predicate)
 
@@ -414,7 +500,9 @@ def custom_production_summary(
         cell.alignment = centered
         column += 1
 
-    _draw_custom_groups(sheet, start_row=header_row, start_col=column)
+    _draw_custom_groups(
+        sheet, start_row=header_row, start_col=column, short=short
+    )
 
     # Настройка ширины колонок.
     widths = (

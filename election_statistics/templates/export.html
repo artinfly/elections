@@ -118,6 +118,9 @@
                             <option value="people" {% if request.GET.grouping == "people" or not request.GET.grouping %}selected{% endif %}>По людям (список)</option>
                             <option value="production_with_depts" {% if request.GET.grouping == "production_with_depts" %}selected{% endif %}>По производствам (с цехами)</option>
                             <option value="production_without_depts" {% if request.GET.grouping == "production_without_depts" %}selected{% endif %}>По производствам (без цехов)</option>
+                            <option value="people_compact" {% if request.GET.grouping == "people_compact" %}selected{% endif %}>По людям (список, компактный)</option>
+                            <option value="production_with_depts_compact" {% if request.GET.grouping == "production_with_depts_compact" %}selected{% endif %}>По производствам (с цехами, компактный)</option>
+                            <option value="production_without_depts_compact" {% if request.GET.grouping == "production_without_depts_compact" %}selected{% endif %}>По производствам (без цехов, компактный)</option>
                         </select>
                     </div>
                     

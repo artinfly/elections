@@ -8,7 +8,7 @@
     {# ========================================================================== #}
     <div class="page-header">
         <h5>Способ голосования</h5>
-        <span class="row-count-label">Найдено: {{ found }}</span>
+        <span class="row-count-label" id="found-count">Найдено: {{ found }}</span>
     </div>
 
     {# ========================================================================== #}
@@ -17,7 +17,7 @@
     {# перезагрузки страницы. Порядок карточек в DOM строго соответствует          #}
     {# индексам в JS-массиве (0..5).                                              #}
     {# ========================================================================== #}
-    <div class="dash-row mb-4">
+    <div class="dash-row mb-4" id="dash-row">
         {# 0: ДЭГ #}
         <div>
             <div class="dash-card">
@@ -94,6 +94,7 @@
     {# ТАБЛИЦА СОТРУДНИКОВ                                                        #}
     {# В заголовке 9 колонок. В теле строки должно быть ровно 9 ячеек <td>.       #}
     {# ========================================================================== #}
+    <div id="results-table">
     <div class="table-container">
         <table class="report-table">
             <thead>
@@ -196,6 +197,7 @@
     {# ПАГИНАЦИЯ                                                                  #}
     {# ========================================================================== #}
     {% include "_pagination.html" %}
+    </div>
 {% endblock %}
 
 {% block scripts %}
@@ -206,24 +208,19 @@
     // ========================================================================
     // 1. Обработчик переключателей способа голосования (сегменты в последней колонке)
     // ========================================================================
+    function bindTableEvents() {
     document.querySelectorAll('.seg-method').forEach(function (seg) {
         seg.addEventListener('click', function (e) {
-            if (!canEdit) return; 
-            
+            if (!canEdit) return;
             var btn = e.target.closest('button');
             if (!btn) return;
-            
             var isOn = btn.classList.contains('on');
-            
             postJSON('/api/method/', {
                 id: seg.dataset.id,
                 method: isOn ? '' : btn.dataset.m
             }).then(function (c) {
                 // Снимаем выделение со всех кнопок в текущем сегменте
-                seg.querySelectorAll('button').forEach(function (b) { 
-                    b.classList.remove('on'); 
-                });
-                
+                seg.querySelectorAll('button').forEach(function (b) {  b.classList.remove('on'); });
                 // Если способ был назначен, выделяем активную кнопку
                 if (!isOn) {
                     btn.classList.add('on');
@@ -286,6 +283,14 @@
                 btn.textContent = data.absence ? btn.dataset.onLabel : btn.dataset.offLabel;
             });
         });
+    });
+    }
+    bindTableEvents();
+
+    document.body.addEventListener('htmx:aferSwap', function (evt) {
+        if (evt.detail.target && evt.detail.target.id === 'results-table') {
+            bindTableEvents();
+        }
     });
 </script>
 {% endblock %}

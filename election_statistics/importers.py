@@ -8,6 +8,7 @@
 """
 
 import io
+import re
 import zipfile
 from datetime import date, datetime, time
 from typing import Any, Iterator
@@ -744,6 +745,30 @@ RESPONSIBLE_COLUMNS = {
     "Отметка": "mark",
 }
 
+HEADER_ALIASES = {
+    "Таб": [
+        "таб",
+        "табельный",
+        "табельный номер",
+        "таб.",
+        "таб №",
+        "таб. №",
+        "№ таб",
+        "табельный №",
+        "nf,tkmysq",
+        "nf,",
+        "nf,tkmysq yjvth",
+    ],
+    "Отметка": [
+        "отметка",
+        "ометка",
+        "отм." "проголосовал",
+        "проголосовал (если проголосовал то 1)",
+        "голосовал",
+        "гол",
+    ],
+}
+
 
 def import_responsible_marks(upload: Any) -> tuple[int, int, int]:
     """
@@ -764,7 +789,7 @@ def import_responsible_marks(upload: Any) -> tuple[int, int, int]:
         nonlocal total_rows, total_errors
         with _sheet(file_obj) as rows:
             try:
-                positions = _header(rows, RESPONSIBLE_COLUMNS)
+                positions = _header(rows, RESPONSIBLE_COLUMNS, aliases=HEADER_ALIASES)
             except ValueError:
                 total_errors += 1
                 return
