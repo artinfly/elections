@@ -170,6 +170,7 @@
 {% block scripts %}
 <script>
     const canEdit = {% if can_edit %}true{% else %}false{% endif %};
+    const FOUND = {{ found }};
     const BULK_LIMIT = 100;
     // ========================================================================
     // 1. Вспомогательная функция: сбор текущих фильтров из URL
@@ -212,6 +213,7 @@
         btn.classList.toggle('on', voted);
         btn.textContent = voted ? 'Проголосовал' : 'Не голосовал';
         const place = row.querySelector('.place-badge');
+        if (!place) return; // Колонки "Где голосовал" нет для is_uik_uvz_viewer — это нормально
         // Если явка отмечена, показываем запланированный способ (из data-plan).
         place.textContent = voted ? btn.dataset.plan : '';
         place.hidden = !place.textContent;
@@ -226,10 +228,10 @@
             const row = btn.closest('tr');
             const voted = !btn.classList.contains('on');
             // Бизнес-правило: нельзя отметить явку, если не выбран способ голосования.
-            if (voted && !btn.dataset.plan) {
+            {% comment %} if (voted && !btn.dataset.plan) {
                 alert('Сначала выберите способ голосования на странице "Способ голосования".');
                 return;
-            }
+            } {% endcomment %}
             postJSON('/api/voted/', {
                 id: btn.dataset.id, 
                 voted: voted,
@@ -243,7 +245,7 @@
     }
     bindTableEvents();
     
-    document.body.addEventListener('htmx:aferSwap', function (evt) {
+    document.body.addEventListener('htmx:afterSwap', function (evt) {
         if (evt.detail.target && evt.detail.target.id === 'results-table') {
             bindTableEvents();
         }

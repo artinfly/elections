@@ -722,7 +722,14 @@ def department_custom_report(
     """
     # Локальный импорт: позволяет использовать функции конструктора отчетов,
     # избегая циклических зависимостей между модулями.
-    from .custom_reports import _custom_qs, _draw_custom_groups
+    from collections import defaultdict
+
+    from .custom_reports import (
+        GROUP_PLAN_PREDICATE,
+        _custom_qs,
+        _draw_custom_groups,
+        _percent_denominator_groups,
+    )
 
     moment = moment or timezone.localtime()
 
@@ -754,6 +761,12 @@ def department_custom_report(
     # Отрисовка групп колонок (ДЭГ, УИК и т.д.) и получение списка предикатов.
     predicates = _draw_custom_groups(sheet, start_row=1, start_col=column)
 
+    # Список, параллельный predicates: для колонок "Проголосовал (QR-код)" и
+    # "Проголосовал (ответственный)" процент нужно считать не от total_people,
+    # а от количества людей, планирующих голосовать соответствующим способом
+    # (см. GROUP_PLAN_PREDICATE в custom_reports.py).
+    percent_denominator_groups = _percent_denominator_groups(short=False, with_total=True)
+
     widths = (10, 8, 10, 42, 8) + (12,) * len(predicates)
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
@@ -763,6 +776,9 @@ def department_custom_report(
     row = 3
     totals = [0] * len(predicates)
     total_people = 0
+    # Счётчики "Планирует" по каждой группе способов голосования — нужны как
+    # знаменатель процента для колонок "Проголосовал (QR-код)"/"(ответственный)".
+    plan_counts: dict[str, int] = defaultdict(int)
 
     # Итератор с размером пачки 2000 строк не держит всю выборку в памяти.
     for person in people.iterator(chunk_size=2000):
@@ -778,15 +794,21 @@ def department_custom_report(
             if predicate(person):
                 sheet.cell(row, 6 + offset, "+")
                 totals[offset] += 1
+
+        for group, plan_predicate in GROUP_PLAN_PREDICATE.items():
+            if plan_predicate(person):
+                plan_counts[group] += 1
         row += 1
 
-    # Строка ИТОГО.
-    sheet.cell(row, 1, "ИТОГО").font = bold
-    sheet.cell(row, 2, total_people).font = bold
-    sheet.cell(row, 2).alignment = centered
+    # Строка ИТОГО — подписываем под колонкой "ФИО", а не под "Номер УИК"/"Цех".
+    total_cell = sheet.cell(row, 4, f"ИТОГО: {total_people} чел.")
+    total_cell.font = bold
+    total_cell.alignment = centered
 
     for offset, total in enumerate(totals):
-        cell = sheet.cell(row, 6 + offset, _format_with_percent(total, total_people))
+        denom_group = percent_denominator_groups[offset]
+        denom = plan_counts[denom_group] if denom_group else total_people
+        cell = sheet.cell(row, 6 + offset, _format_with_percent(total, denom))
         cell.font = bold
         cell.alignment = centered
 

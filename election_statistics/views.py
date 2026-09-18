@@ -716,7 +716,8 @@ def api_voted(request: HttpRequest) -> JsonResponse:
 
     voted = bool(data.get("voted"))
     if voted and not employee.method:
-        return JsonResponse({"error": "Не выбран способ голосования"}, status=400)
+        Employee.objects.filter(tab_number=employee.tab_number).update(method=UIK)
+        # return JsonResponse({"error": "Не выбран способ голосования"}, status=400)
 
     mark_voted([employee.tab_number], voted=voted)
 
@@ -918,7 +919,7 @@ def export_custom_report(request: HttpRequest) -> HttpResponse:
     elif grouping == "production_without_depts_compact":
         book = custom_production_summary(request.GET, include_depts=False, short=True)
         name = f"svodny_po_proizvodstvam_{moment_str}"
-        print('adasd')
+        print("adasd")
     else:
         book = custom_report(request.GET)
         name = f"svodny_otchet_{moment_str}"
