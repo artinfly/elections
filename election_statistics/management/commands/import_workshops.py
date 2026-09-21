@@ -1,3 +1,12 @@
+"""
+Переносит справочник «цех → производство» из внешней базы в поле production у работников.
+
+Читает пары (номер цеха, название производства) через SQL-запрос, нормализует
+номера через padded_number («7» → «007») и атомарно обновляет разметку.
+Пароль подключения к внешней базе запрашивается интерактивно, чтобы не попасть
+в историю команд оболочки.
+"""
+
 import getpass
 
 import psycopg2
@@ -7,8 +16,6 @@ from django.db import transaction
 from election_statistics.helpers import padded_number
 from election_statistics.models import Employee
 
-# Запрос к внешней базе: пары "номер цеха -> название производства".
-# Читается только справочник, данные работников внешней базы не трогаем.
 QUERY = """
     select cw."number", cp."name"
     from core_workshop cw
@@ -18,19 +25,18 @@ QUERY = """
 
 
 class Command(BaseCommand):
-    help = "Переносит справочник цех -> производство из базы"
+    help = "Переносит справочник «цех → производство» из внешней базы."
 
     def add_arguments(self, parser):
-        # Параметры подключения к внешней базе; пароль не передаётся аргументом,
-        # а запрашивается интерактивно, чтобы не светиться в истории команд
         parser.add_argument("--host", required=True)
         parser.add_argument("--dbname", required=True)
         parser.add_argument("--user", required=True)
         parser.add_argument("--port", default="5432")
 
     def handle(self, *args, **options):
-        # --- Шаг 1. Читаем справочник из внешней базы ---
         password = getpass.getpass("Пароль: ")
+
+        # Читаем справочник из внешней базы.
         source = None
         try:
             source = psycopg2.connect(
@@ -46,13 +52,10 @@ class Command(BaseCommand):
         except psycopg2.Error as error:
             raise CommandError(f"Не удалось прочитать базу: {error}")
         finally:
-            # Соединение закрываем в любом случае, даже при ошибке
             if source is not None:
                 source.close()
 
-        # --- Шаг 2. Собираем словарь {цех: производство} с нормализацией номеров ---
-        # Номера цехов приводятся к единому виду (padded_number: "7" -> "007"),
-        # пустые значения отбрасываются
+        # Нормализуем пары (номер цеха → производство); пустые отбрасываем.
         pairs = {}
         for number, production in fetched:
             number = str(number or "").strip()
@@ -60,11 +63,10 @@ class Command(BaseCommand):
             if number and production:
                 pairs[padded_number(number)] = production
 
-        # Пустой справочник — ошибка, чтобы молча не стереть разметку
         if not pairs:
-            raise CommandError("Запрос не вернул ни одной пары цех - производство")
+            raise CommandError("Запрос не вернул ни одной пары «цех — производство»")
 
-        # --- Шаг 3. Группируем цеха нашей базы по производствам ---
+        # Группируем цеха нашей базы по производствам.
         departments = list(
             Employee.objects.exclude(department="")
             .values_list("department", flat=True)
@@ -76,26 +78,25 @@ class Command(BaseCommand):
             if production:
                 by_production.setdefault(production, []).append(department)
 
-        # --- Шаг 4. Атомарно переразмечаем поле production у работников ---
-        # Сначала сбрасываем старую разметку, затем ставим новую по справочнику.
-        # Всё в одной транзакции: при сбое база не останется полустёртой
+        # Атомарная переразметка: сбрасываем старое и ставим новое в одной транзакции.
         with transaction.atomic():
             Employee.objects.exclude(production="").update(production="")
-            marked = 0
-            for production, group in by_production.items():
-                marked += Employee.objects.filter(department__in=group).update(
+            marked = sum(
+                Employee.objects.filter(department__in=group).update(
                     production=production
                 )
+                for group in by_production.values()
+            )
 
-        # --- Шаг 5. Итоговая статистика для оператора ---
+        # Итоги.
         self.stdout.write(f"Строк получено: {len(fetched)}")
         self.stdout.write(f"Цехов в справочнике: {len(pairs)}")
         self.stdout.write(f"Производств: {len(by_production)}")
         self.stdout.write(f"Работников размечено: {marked}")
 
-        # Цеха, которые есть у работников, но отсутствуют в справочнике,
-        # выводим красным — их нужно добавить во внешнюю базу или поправить запрос
         used = {padded_number(value) for value in departments}
+
+        # Цеха, по которым у нас есть работники, но нет в справочнике — сигнал о дыре.
         missing = sorted(used - set(pairs))
         if missing:
             self.stdout.write(
@@ -107,7 +108,7 @@ class Command(BaseCommand):
         else:
             self.stdout.write(self.style.SUCCESS("Все цеха базы нашлись в справочнике"))
 
-        # Цеха из справочника, по которым у нас нет людей, — просто информация
+        # Цеха из справочника без работников — просто для информации.
         unused = sorted(set(pairs) - used)
         if unused:
             self.stdout.write(
