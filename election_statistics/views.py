@@ -41,6 +41,8 @@ from .reports import (
     summary_table,
     summary_table_no_u19,
 )
+from .uvz_reports import uvz_statement_not_voted_table
+from .vn_reports import custom_production_summary_vn
 
 # ==============================================================================
 # Константы
@@ -63,7 +65,6 @@ CUSTOM_OKRUG_OPTIONS = [
 # Используется для проверки: нельзя поставить отметку о регистрации на ДЭГ,
 # если сотрудник выбрал голосование на обычном участке.
 MARK_FIELDS = {"mark_deg": DEG, "mark_uvz": UVZ}
-
 
 # ==============================================================================
 # Вспомогательные функции (Helpers)
@@ -505,6 +506,10 @@ def export_page(request: HttpRequest) -> HttpResponse:
             "methods": METHODS,
             "uiks": filter_options["uiks"],
             "custom_okrugs": CUSTOM_OKRUG_OPTIONS,
+            # Сколько человек оформили заявление на УВЗ, но не проголосовали.
+            "uvz_not_voted_count": Employee.objects.filter(
+                method=UVZ, mark_uvz=True, voted=False
+            ).count(),
         },
     )
 
@@ -606,7 +611,7 @@ def upload_custom_report(request: HttpRequest) -> HttpResponse:
         )
     except ValueError as exc:
         request.session["msg"] = str(exc)
-    except Exception as exc:  # ИСПРАВЛЕНО: была опечатка 'ecx'
+    except Exception as exc:
         request.session["msg"] = f"Неожиданная ошибка: {str(exc)}"
 
     return redirect("upload")
@@ -833,6 +838,14 @@ def export_employees(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+def export_uvz_statement_not_voted(request: HttpRequest) -> HttpResponse:
+    """Экспорт списка: заявление на УИК-УВЗ оформлено, но не проголосовал."""
+    return _make_excel_response(
+        uvz_statement_not_voted_table(), "spisok_ne_progolosovavshih_na_UIK-UVZ"
+    )
+
+
+@login_required
 def export_responsible_template(request: HttpRequest) -> HttpResponse:
     """Экспорт шаблона для заполнения отметок «Голосование через ответственного»."""
     if not is_operator(request.user):
@@ -900,7 +913,7 @@ def export_method_archive(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def export_custom_report(request: HttpRequest) -> HttpResponse:
-    """Экспорт кастомного отчета (по людям или по производствам)."""
+    """Экспорт кастомного отчета (по людям или по производствам, включая ВН)."""
     grouping = request.GET.get("grouping", "people")
     moment_str = timezone.localtime().strftime("%Y%m%d_%H%M")
 
@@ -919,7 +932,12 @@ def export_custom_report(request: HttpRequest) -> HttpResponse:
     elif grouping == "production_without_depts_compact":
         book = custom_production_summary(request.GET, include_depts=False, short=True)
         name = f"svodny_po_proizvodstvam_{moment_str}"
-        print("adasd")
+    elif grouping == "production_with_depts_vn":
+        book = custom_production_summary_vn(request.GET, include_depts=True)
+        name = f"svodny_po_proizvodstvam_s_cehami_vn_{moment_str}"
+    elif grouping == "production_without_depts_vn":
+        book = custom_production_summary_vn(request.GET, include_depts=False)
+        name = f"svodny_po_proizvodstvam_vn_{moment_str}"
     else:
         book = custom_report(request.GET)
         name = f"svodny_otchet_{moment_str}"

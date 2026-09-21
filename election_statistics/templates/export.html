@@ -121,6 +121,9 @@
                             <option value="people_compact" {% if request.GET.grouping == "people_compact" %}selected{% endif %}>По людям (список, компактный)</option>
                             <option value="production_with_depts_compact" {% if request.GET.grouping == "production_with_depts_compact" %}selected{% endif %}>По производствам (с цехами, компактный)</option>
                             <option value="production_without_depts_compact" {% if request.GET.grouping == "production_without_depts_compact" %}selected{% endif %}>По производствам (без цехов, компактный)</option>
+                            {# НОВЫЕ РЕЖИМЫ ВН #}
+                            <option value="production_with_depts_vn" {% if request.GET.grouping == "production_with_depts_vn" %}selected{% endif %}>По производствам (с цехами, ВН)</option>
+                            <option value="production_without_depts_vn" {% if request.GET.grouping == "production_without_depts_vn" %}selected{% endif %}>По производствам (без цехов, ВН)</option>
                         </select>
                     </div>
                     
@@ -265,6 +268,23 @@
                     <div class="export-num">{{ departments_count }}</div>
                     <div class="export-unit">цехов</div>
                     <a class="btn-orange" href="{% url 'export_archive' %}">Скачать</a>
+                </div>
+            </div>
+
+            {# НОВЫЙ ОТЧЁТ: заявление на УИК-УВЗ оформлено, но не проголосовал #}
+            <div class="card-block export-row">
+                <div class="export-text">
+                    <div class="block-title">Список не проголосовавших на УИК-УВЗ</div>
+                    <div class="hint">
+                        Список сотрудников, у которых стоит отметка «Заявление оформил»
+                        на участке УИК-УВЗ, но нет отметки о голосовании: цех, табельный
+                        номер и ФИО. Сортировка: по цеху, затем по ФИО.
+                    </div>
+                </div>
+                <div class="export-side">
+                    <div class="export-num">{{ uvz_not_voted_count }}</div>
+                    <div class="export-unit">человек</div>
+                    <a class="btn-orange" href="{% url 'export_uvz_statement_not_voted' %}">Скачать</a>
                 </div>
             </div>
 
