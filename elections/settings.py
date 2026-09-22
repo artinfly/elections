@@ -105,10 +105,10 @@ WSGI_APPLICATION = "elections.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("DB_NAME", "elections_test"),
+        "NAME": "elections_test",
         "USER": "root",
         "PASSWORD": "root",
-        "HOST": os.getenv("DB_HOST", "10.10.10.37"),
+        "HOST": "localhost",
         "PORT": "5432",
         "OPTIONS": {"client_encoding": "UTF8"},
     }
