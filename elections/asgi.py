@@ -1,16 +1,16 @@
 """
-ASGI config for elections project.
+ASGI-точка входа проекта elections.
 
-It exposes the ASGI callable as a module-level variable named ``application``.
-
-For more information on this file, see
-https://docs.djangoproject.com/en/6.0/howto/deployment/asgi/
+Сейчас не используется: проект полностью синхронный и отдаётся по WSGI
+(wsgi.py). Файл понадобится только при переходе на ASGI-сервер
+(uvicorn, daphne) или появлении асинхронных фич — например, WebSocket.
 """
 
 import os
 
 from django.core.asgi import get_asgi_application
 
+# setdefault, как в manage.py: значение из внешнего окружения имеет приоритет
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "elections.settings")
 
 application = get_asgi_application()

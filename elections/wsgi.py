@@ -1,16 +1,16 @@
 """
-WSGI config for elections project.
+WSGI-точка входа проекта elections.
 
-It exposes the WSGI callable as a module-level variable named ``application``.
-
-For more information on this file, see
-https://docs.djangoproject.com/en/6.0/howto/deployment/wsgi/
+Модульная переменная ``application`` — то, что вызывает продакшен-сервер
+(gunicorn, uWSGI) при обработке каждого запроса.
+Разработочный сервер (runserver) этот файл не использует.
 """
 
 import os
 
 from django.core.wsgi import get_wsgi_application
 
+# setdefault, как в manage.py: значение из внешнего окружения имеет приоритет
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "elections.settings")
 
 application = get_wsgi_application()

@@ -1,6 +1,10 @@
 .venv/
 __pycache__/
 *.pyc
+*.log
 *.xlsx
+.vscode/*
 staticfiles/
-.env
+election_statistics/migrations/*
+election_statistics/*_old.py
+election_statistics/*_new.py

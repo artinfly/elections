@@ -1,16 +1,19 @@
 {
-    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
-    "editor.tabSize": 4,
-    "editor.detectIndentation": false,
+    "python.defaultInterpreterPath": ".venv\\Scripts\\python.exe",
     "[python]": {
         "editor.defaultFormatter": "ms-python.black-formatter",
         "editor.formatOnSave": true,
         "editor.codeActionsOnSave": {
             "source.organizeImports": "explicit"
         },
-        "editor.rulers": [88]
+        "editor.rulers": [
+            88
+        ]
     },
-    "isort.args": ["--profile", "black"],
+    "isort.args": [
+        "--profile",
+        "black"
+    ],
     "files.associations": {
         "**/templates/**/*.html": "django-html"
     },
@@ -20,7 +23,20 @@
     "search.exclude": {
         "**/.venv": true,
         "**/staticfiles": true,
+        "**/wheels": true,
         "**/static/vendor": true,
         "**/migrations": true
+    },
+    "[html]": {
+        "editor.tabSize": 4
+    },
+    "[django-html]": {
+        "editor.tabSize": 4
+    },
+    "[css]": {
+        "editor.tabSize": 4
+    },
+    "[javascript]": {
+        "editor.tabSize": 4
     }
 }

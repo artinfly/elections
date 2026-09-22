@@ -1,0 +1,1 @@
+default_app_config = "election_statistics.apps.ElectionStatisticsConfig"
