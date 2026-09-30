@@ -55,10 +55,11 @@
 
 /* Кнопка отметки явки в строке таблицы */
 .vote-btn {
-    border: 1px solid #ddd; background: #fff; border-radius: 5px;
-    padding: .18rem .7rem; font-size: .75rem; cursor: pointer;
+    border: 2px solid #ddd; background: #fff; border-radius: 5px;
+    padding: .18rem .7rem; font-size: 0.9rem; cursor: pointer;
     font-family: inherit; color: #555; transition: all .12s;
-}
+    width: 300px;
+} 
 .vote-btn:hover { border-color: #16a34a; color: #16a34a; }
 .vote-btn.on {
     background: rgba(22, 163, 74, .12); border-color: #16a34a;
