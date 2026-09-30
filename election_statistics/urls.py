@@ -3,7 +3,7 @@
 
 Описание:
     Здесь прописывается связь между адресом в браузере (например, /login/)
-    и функцией в файле views.py, которая должна сработать при переходе по нему.
+    и функцией в файле views.py, которая должна сработать при переходе.
     Каждый маршрут имеет имя (параметр name), которое используется в коде
     и шаблонах для генерации ссылок и перенаправлений.
 """
@@ -59,6 +59,12 @@ urlpatterns = [
     # ==============================================================================
     # Выгрузка полного списка всех сотрудников со всеми данными.
     path("export/employees/", views.export_employees, name="export_employees"),
+    # Список: заявление на УИК-УВЗ оформлено, но не проголосовал.
+    path(
+        "export/uvz-statement-not-voted/",
+        views.export_uvz_statement_not_voted,
+        name="export_uvz_statement_not_voted",
+    ),
     # Шаблон Excel для заполнения отметок «Голосование через ответственного».
     path(
         "export/responsible-template/",
@@ -81,7 +87,7 @@ urlpatterns = [
         views.export_production_methods,
         name="export_production_methods",
     ),
-    # Способы голосования по производствам без учета 19-го округа.
+    # Способы голосования по производствам без учета 19 округа.
     path(
         "export/productions-methods-no-u19/",
         views.export_production_methods_no_19,

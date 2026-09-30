@@ -118,9 +118,6 @@
 
     var body = document.getElementById("uik-modal-body");
     var sub = document.getElementById("uik-modal-sub");
-    
-    // Флаг включает колонки явки в таблице модалки (активно на странице elections).
-    var withTurnout = card.dataset.turnout === "1";
 
     /**
      * Скрывает модальное окно.
@@ -134,7 +131,7 @@
      *
      * @param {Array<Object>} rows - Массив объектов {uik, people, came} из API.
      */
-    function renderModal(rows) {
+    function renderModal(rows, withTurnout) {
         if (!rows.length) {
             body.innerHTML = '<div class="modal-empty">Нет данных</div>';
             sub.textContent = "";
@@ -177,7 +174,10 @@
     }
 
     // Обработчик открытия модалки по клику на карточку УИК.
-    card.addEventListener("click", function () {
+    document.addEventListener("click", function (e) {
+        var card = e.target.closest("#uik-card");
+        if (!card) return;
+        var withTurnout = card.dataset.turnout === "1";
         modal.hidden = false;
         body.innerHTML = '<div class="modal-empty">Загрузка...</div>';
         sub.textContent = "";
@@ -190,7 +190,7 @@
                 if (!r.ok) throw new Error("сервер ответил " + r.status);
                 return r.json();
             })
-            .then(renderModal)
+            .then(function (rows) {renderModal(rows, withTurnout); })
             .catch(function (error) {
                 body.innerHTML = '<div class="modal-empty">Не удалось загрузить: ' +
                                  escapeHtml(error.message) + "</div>";

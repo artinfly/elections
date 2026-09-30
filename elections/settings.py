@@ -8,6 +8,7 @@
     должны быть заменены при развертывании на боевом сервере.
 """
 
+import os
 from pathlib import Path
 
 # ==============================================================================
@@ -37,13 +38,13 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1", "testserver"]
 # Список установленных приложений.
 # Порядок важен: приложения, зависящие от других, должны быть ниже.
 INSTALLED_APPS = [
+    "election_statistics",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "election_statistics",
 ]
 
 # Список middleware (прослоек), обрабатывающих запросы и ответы.
@@ -104,12 +105,11 @@ WSGI_APPLICATION = "elections.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": "elections",
+        "NAME": "elections_test",
         "USER": "root",
         "PASSWORD": "root",
         "HOST": "localhost",
         "PORT": "5432",
-        # Явное указание кодировки для корректной работы с кириллицей.
         "OPTIONS": {"client_encoding": "UTF8"},
     }
 }
@@ -189,4 +189,4 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024
 # Тип автоинкрементного первичного ключа по умолчанию для всех моделей.
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-HR_SERVICE_API_URL = "http://localhost:8001/api/"
+HR_SERVICE_API_URL = "http://localhost:8002/api/employee/"

@@ -5,3 +5,6 @@ __pycache__/
 *.xlsx
 .vscode/*
 staticfiles/
+election_statistics/migrations/*
+election_statistics/*_old.py
+election_statistics/*_new.py

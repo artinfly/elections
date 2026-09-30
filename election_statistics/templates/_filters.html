@@ -2,7 +2,14 @@
   Отправляется GET-ом на текущую страницу, выбранные значения сохраняются
   через selected/{{ f.* }}, чтобы фильтры не сбрасывались после поиска. #} {% endcomment %}
 <div class="filter-panel mb-3">
-    <form method="get">
+    <form method="get" id="filter-form"
+        hx-get="{{ request.path }}"
+        hx-target="#results-table"
+        hx-select="#results-table"
+        hx-select-oob="#found-count, #dash-row{% if with_status %},#bulk_count{% endif %}"
+        hx-swap="outerHTML"
+        hx-push-url="true"
+        hx-trigger="input changed delay:400ms, change, submit">
         <div class="d-flex flex-wrap gap-3 align-items-end">
             {# Текстовый поиск: табельный номер или ФИО (каждое слово ищется отдельно) #}
             <div class="filter-group grow">
