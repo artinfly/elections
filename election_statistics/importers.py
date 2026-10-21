@@ -8,7 +8,6 @@
 """
 
 import io
-import re
 import zipfile
 from datetime import date, datetime, time
 from typing import Any, Iterator
@@ -174,192 +173,6 @@ def mark_voted(tabs: list, voted: bool = True) -> tuple[int, int]:
 
 
 # ==============================================================================
-# Импорт отчётов штаба (Способы голосования)
-# ==============================================================================
-
-NEW_FORMAT_COLUMNS = {
-    "Таб.№": "tab_number",
-    "ФИО": "fio_raw",
-    "Очно на своем избирательном участке": "uik",
-    "При помощи дистанционного электронного голосования ДЭГ": "deg",
-    "Очно на временном избирательном участке на территории предприятия": "uvz",
-    "Очно на избирательном участке 19 округа": "u19",
-}
-
-
-def import_voting_choices(upload: Any) -> tuple[int, int, int]:
-    """
-    Импортирует выбранные способы голосования из отчёта штаба.
-
-    Описание:
-        Анализирует структуру файла, находит нужные колонки и обновляет поле method.
-        Игнорирует строки, где выбрано более одного способа (считает ошибкой).
-
-    Возвращает:
-        tuple[int, int, int]: (обновлено, всего строк, ошибок/пропусков).
-    """
-    with _sheet(upload) as rows:
-        all_rows = list(rows)
-
-    if not all_rows:
-        raise ValueError("Ошибка: файл пустой")
-
-    header_row_idx = 0
-    for idx, row in enumerate(all_rows):
-        cells = [str(cell or "").strip() for cell in row if cell is not None]
-        if "Таб.№" in cells or "ФИО" in cells:
-            header_row_idx = idx
-            break
-
-    if header_row_idx >= len(all_rows) - 1:
-        raise ValueError("Ошибка: не найдена строка с данными")
-
-    header_row = all_rows[header_row_idx]
-    col_indices = {}
-    for idx, cell in enumerate(header_row):
-        cell_str = str(cell or "").strip()
-        for key in NEW_FORMAT_COLUMNS:
-            if key in cell_str:
-                col_indices[key] = idx
-                break
-
-    if "Таб.№" not in col_indices or "ФИО" not in col_indices:
-        raise ValueError("Ошибка: не найдены обязательные колонки 'Таб.№' или 'ФИО'")
-
-    method_cols = {
-        "uik": col_indices.get("Очно на своем избирательном участке"),
-        "deg": col_indices.get(
-            "При помощи дистанционного электронного голосования ДЭГ"
-        ),
-        "uvz": col_indices.get(
-            "Очно на временном избирательном участке на территории предприятия"
-        ),
-        "u19": col_indices.get("Очно на избирательном участке 19 округа"),
-    }
-
-    if not any(method_cols.values()):
-        raise ValueError("Ошибка: не найдены колонки способов голосования")
-
-    file_data = {}
-    total = 0
-    parse_errors = 0
-
-    for row in all_rows[header_row_idx + 1 :]:
-        if not any(row):
-            continue
-
-        total += 1
-
-        try:
-            tab_col = col_indices["Таб.№"]
-            tab_number = _text(row[tab_col] if tab_col < len(row) else None)
-            if not tab_number:
-                continue
-
-            if tab_number.isdigit():
-                tab_number = tab_number.zfill(7)
-
-            selected_method = ""
-            for method_code, col_idx in method_cols.items():
-                if col_idx is not None and col_idx < len(row):
-                    if _text(row[col_idx]) == "1":
-                        if selected_method:
-                            parse_errors += 1
-                            selected_method = ""
-                            break
-                        selected_method = method_code
-
-            if not selected_method:
-                continue
-
-            file_data[tab_number] = selected_method
-
-        except Exception:
-            parse_errors += 1
-            continue
-
-    if not file_data:
-        return 0, total, parse_errors
-
-    existing_employees = {
-        emp.tab_number: emp
-        for emp in Employee.objects.filter(tab_number__in=file_data.keys())
-    }
-
-    employees_to_update = []
-    not_found_errors = 0
-
-    for tab_number, selected_method in file_data.items():
-        employee = existing_employees.get(tab_number)
-        if employee is None:
-            not_found_errors += 1
-            continue
-
-        if employee.method != selected_method:
-            employee.method = selected_method
-            employees_to_update.append(employee)
-
-    if employees_to_update:
-        Employee.objects.bulk_update(
-            employees_to_update, fields=["method"], batch_size=BATCH
-        )
-
-    updated = len(employees_to_update)
-    errors = parse_errors + not_found_errors
-
-    return updated, total, errors
-
-
-# ==============================================================================
-# Импорт явки из списка табельных номеров (простой)
-# ==============================================================================
-
-
-def import_turnout(upload: Any) -> tuple[int, int, int]:
-    """
-    Импортирует явку из простого списка табельных номеров (одна колонка).
-
-    Описание:
-        Пропускает сотрудников, у которых не выбран способ голосования.
-
-    Возвращает:
-        tuple[int, int, int]: (изменено, всего строк, ошибок/пропусков).
-    """
-    with _sheet(upload) as rows:
-        all_rows = list(rows)
-
-    if not all_rows:
-        raise ValueError("Ошибка: файл пустой")
-
-    header = str(all_rows[0][0] or "").strip().lower()
-    if "табель" not in header and "таб" not in header:
-        raise ValueError("Ошибка: в А1 ожидается заголовок 'Табельный'")
-
-    tabs = []
-    for row in all_rows[1:]:
-        if not row:
-            continue
-        tab = _text(row[0])
-        if tab and str(tab).isdigit():
-            tabs.append(str(tab).zfill(7))
-
-    if not tabs:
-        return 0, 0, 0
-
-    total_rows = len(tabs)
-    found = Employee.objects.filter(tab_number__in=tabs)
-    missing_in_db = total_rows - found.count()
-
-    valid_found = found.exclude(method="")
-    skipped_no_method = found.filter(method="").count()
-
-    changed = set_turnout(valid_found, voted=True)
-    errors = missing_in_db + skipped_no_method
-
-    return changed, total_rows, errors
-
-
-# ==============================================================================
 # Импорт явки из отчёта штаба (с датой и временем)
 # ==============================================================================
 
@@ -423,7 +236,6 @@ def import_turnout_hq_archive(upload: Any) -> tuple[int, int, int]:
     Возвращает:
         tuple[int, int, int]: (изменено, всего строк, ошибок/пропусков).
     """
-    total_changed = 0
     total_rows = 0
     total_errors = 0
     all_tabs_data = {}
@@ -434,34 +246,33 @@ def import_turnout_hq_archive(upload: Any) -> tuple[int, int, int]:
                 if file_info.filename.endswith(
                     ".xlsx"
                 ) and not file_info.filename.startswith("__MACOSX"):
-                    with zip_ref.open(file_info) as excel_file:
-                        file_content = io.BytesIO(zip_ref.read(file_info.filename))
-                        with _sheet(file_content) as rows:
-                            all_rows = list(rows)
+                    file_content = io.BytesIO(zip_ref.read(file_info.filename))
+                    with _sheet(file_content) as rows:
+                        all_rows = list(rows)
 
-                        if len(all_rows) < 2:
+                    if len(all_rows) < 2:
+                        continue
+
+                    for row in all_rows[1:]:
+                        if not any(row):
                             continue
-
-                        for row in all_rows[1:]:
-                            if not any(row):
-                                continue
-                            total_rows += 1
-                            try:
-                                tab = _text(row[0] if len(row) > 0 else None)
-                                if not tab or not str(tab).isdigit():
-                                    total_errors += 1
-                                    continue
-                                tab = str(tab).zfill(7)
-
-                                date_val = row[4] if len(row) > 4 else None
-                                time_val = row[5] if len(row) > 5 else None
-
-                                all_tabs_data[tab] = _combine_datetime(
-                                    date_val, time_val
-                                )
-
-                            except Exception:
+                        total_rows += 1
+                        try:
+                            tab = _text(row[0] if len(row) > 0 else None)
+                            if not tab or not str(tab).isdigit():
                                 total_errors += 1
+                                continue
+                            tab = str(tab).zfill(7)
+
+                            date_val = row[4] if len(row) > 4 else None
+                            time_val = row[5] if len(row) > 5 else None
+
+                            all_tabs_data[tab] = _combine_datetime(
+                                date_val, time_val
+                            )
+
+                        except Exception:
+                            total_errors += 1
     except zipfile.BadZipFile:
         raise ValueError("Ошибка: файл не является корректным ZIP-архивом.")
 
@@ -471,8 +282,9 @@ def import_turnout_hq_archive(upload: Any) -> tuple[int, int, int]:
     tabs_list = list(all_tabs_data.keys())
     found = Employee.objects.filter(tab_number__in=tabs_list)
 
-    # Считаем ошибки: не найдено в базе + нет выбранного способа голосования
-    total_errors += (len(tabs_list) - found.count()) + found.filter(method="").count()
+    # Ошибки — табельные номера, которых нет в базе. Люди без способа голосования
+    # ошибкой не считаются: ниже им ставится УИК и они отмечаются как проголосовавшие
+    total_errors += len(tabs_list) - found.count()
 
     employees_to_update = []
     for emp in found:
@@ -594,8 +406,8 @@ def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
         indices = _get_col_indices(header_rows)
 
         if "tab" not in indices:
+            # Лист без колонки табельного номера — считаем ошибкой и пропускаем
             total_errors += 1
-            print(f"Ошибка в файле {filename}: не найден табельный номер")
             return
 
         updates = {}
@@ -655,25 +467,14 @@ def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
 
             except Exception:
                 total_errors += 1
-                print(f"Ошибка в файле: {filename}")
                 continue
 
-        # Если есть любые другие отметки, снимаем флаг "absence" (уважительная причина)
-        for tab, fields in updates.items():
-            other_marks = (
-                "plan_deg",
-                "plan_uik",
-                "plan_uvz",
-                "plan_u19",
-                "mark_deg",
-                "mark_uvz",
-                "detached",
-                "not_going",
-                "voted_deg",
-                "voted_uik",
-                "voted_uvz",
-                "voted_u19",
-            )
+        # Если у человека есть любая другая отметка (способ, регистрация, явка и т.д.),
+        # «Уважительная причина» из файла не ставится. Проверяются именно поля модели,
+        # которые заполняются выше: раньше здесь стояли названия колонок файла
+        # (plan_deg, voted_uik…), их в словаре нет, и отметка УП не снималась.
+        other_marks = ("method", "mark_deg", "detached", "not_going", "voted")
+        for fields in updates.values():
             if any(fields.get(m) for m in other_marks):
                 fields.pop("absence", None)
 
@@ -720,10 +521,9 @@ def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
                     if file_info.filename.endswith(
                         ".xlsx"
                     ) and not file_info.filename.startswith("__MACOSX"):
-                        with zip_ref.open(file_info) as excel_file:
-                            file_content = io.BytesIO(zip_ref.read(file_info.filename))
-                            with _sheet(file_content) as rows:
-                                process_sheet(list(rows), filename=file_info.filename)
+                        file_content = io.BytesIO(zip_ref.read(file_info.filename))
+                        with _sheet(file_content) as rows:
+                            process_sheet(list(rows), filename=file_info.filename)
         else:
             with _sheet(upload) as rows:
                 process_sheet(list(rows), filename=upload.name)
@@ -762,7 +562,8 @@ HEADER_ALIASES = {
     "Отметка": [
         "отметка",
         "ометка",
-        "отм." "проголосовал",
+        "отм.",
+        "проголосовал",
         "проголосовал (если проголосовал то 1)",
         "голосовал",
         "гол",
@@ -836,10 +637,10 @@ def import_responsible_marks(upload: Any) -> tuple[int, int, int]:
         return 0, total_rows, total_errors
 
     found = Employee.objects.filter(tab_number__in=marked_tabs)
-    changed = found.update(
-        proxy_vote=True,
-        voted_at=timezone.now(),
-    )
+    changed = found.update(proxy_vote=True)
+    # Время отметки ставим только тем, у кого его ещё нет: у проголосовавших
+    # по QR-коду оно уже записано, и раньше этот импорт его перезаписывал
+    found.filter(voted_at__isnull=True).update(voted_at=timezone.now())
     total_errors += len(marked_tabs) - found.count()
 
     return changed, total_rows, total_errors

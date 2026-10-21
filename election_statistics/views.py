@@ -26,7 +26,6 @@ from .importers import (
     import_custom_report_archive,
     import_responsible_marks,
     import_turnout_hq_archive,
-    import_voting_choices,
     mark_voted,
     set_turnout,
 )
@@ -201,6 +200,12 @@ def _make_excel_response(workbook: Any, filename_prefix: str) -> HttpResponse:
     )
     workbook.save(response)
     return response
+
+
+def _deny_upload(request: HttpRequest) -> HttpResponse:
+    """Загрузка без прав оператора: сообщение на странице загрузки вместо ошибки."""
+    request.session["msg"] = "Ошибка: загружать файлы может только оператор"
+    return redirect("upload")
 
 
 def _validate_excel_file(file: Any) -> None:
@@ -477,7 +482,7 @@ def upload_page(request: HttpRequest) -> HttpResponse:
         "upload.html",
         {
             "counts": _counts(),
-            "is_operator": True,
+            "is_operator": is_operator(request.user),
             "columns": list(COLUMNS),
             "msg": request.session.pop("msg", ""),
         },
@@ -524,7 +529,7 @@ def export_page(request: HttpRequest) -> HttpResponse:
 def upload_base(request: HttpRequest) -> HttpResponse:
     """Обработчик формы загрузки основного списка сотрудников."""
     if not is_operator(request.user):
-        return JsonResponse({"error": "нет прав"}, status=403)
+        return _deny_upload(request)
 
     upload = request.FILES.get("file")
     try:
@@ -546,33 +551,11 @@ def upload_base(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @require_POST
-def upload_voting_choices(request: HttpRequest) -> HttpResponse:
-    """Обработчик формы загрузки отчета штаба (обновление способов голосования)."""
-    if not is_operator(request.user):
-        return JsonResponse({"error": "нет прав"}, status=403)
-
-    upload = request.FILES.get("file")
-    try:
-        _validate_excel_file(upload)
-    except ValueError as exc:
-        request.session["msg"] = str(exc)
-        return redirect("upload")
-
-    try:
-        updated, total, errors = import_voting_choices(upload)
-        request.session["msg"] = (
-            f"Обработано строк: {total}. Обновлено способов: {updated}, "
-            f"ошибок/пропусков: {errors}"
-        )
-    except ValueError as exc:
-        request.session["msg"] = str(exc)
-    return redirect("upload")
-
-
-@login_required
-@require_POST
 def upload_turnout_hq(request: HttpRequest) -> HttpResponse:
     """Обработчик формы загрузки отметок явки из файла штаба (с датой и временем)."""
+    if not is_operator(request.user):
+        return _deny_upload(request)
+
     upload = request.FILES.get("file")
     if not upload or not upload.name.lower().endswith(".zip"):
         request.session["msg"] = "Ошибка: принимается только формат .zip"
@@ -596,6 +579,9 @@ def upload_turnout_hq(request: HttpRequest) -> HttpResponse:
 @require_POST
 def upload_custom_report(request: HttpRequest) -> HttpResponse:
     """Обработчик формы загрузки кастомного сводного отчёта."""
+    if not is_operator(request.user):
+        return _deny_upload(request)
+
     upload = request.FILES.get("file")
     if not upload or not (
         upload.name.lower().endswith(".zip") or upload.name.lower().endswith(".xlsx")
@@ -622,7 +608,7 @@ def upload_custom_report(request: HttpRequest) -> HttpResponse:
 def upload_responsible_marks(request: HttpRequest) -> HttpResponse:
     """Обработчик формы загрузки отметок «Голосование через ответственного»."""
     if not is_operator(request.user):
-        return JsonResponse({"error": "нет прав"}, status=403)
+        return _deny_upload(request)
 
     upload = request.FILES.get("file")
     if not upload or not (
@@ -721,8 +707,8 @@ def api_voted(request: HttpRequest) -> JsonResponse:
 
     voted = bool(data.get("voted"))
     if voted and not employee.method:
+        # Способ не выбран — при отметке явки считаем, что голосовал на своём участке
         Employee.objects.filter(tab_number=employee.tab_number).update(method=UIK)
-        # return JsonResponse({"error": "Не выбран способ голосования"}, status=400)
 
     mark_voted([employee.tab_number], voted=voted)
 
@@ -976,8 +962,14 @@ def login_view(request: HttpRequest) -> HttpResponse:
     return render(request, "login.html", {"error": error})
 
 
-@login_required
 def logout_view(request: HttpRequest) -> HttpResponse:
-    """Завершение сеанса пользователя и выход из системы."""
+    """
+    Выход из системы — только POST-запросом (кнопка «Выйти» в меню).
+
+    GET (адрес /logout/ открыли напрямую или по чужой ссылке) не разлогинивает,
+    а возвращает на главную.
+    """
+    if request.method != "POST":
+        return redirect("method")
     logout(request)
     return redirect("login")
