@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="{% static 'vendor/bootstrap.min.css' %}">
     <link rel="stylesheet" href="{% static 'css/style.css' %}">
     <link rel="stylesheet" href="{% static 'css/app.css' %}">
-    <script src="{% static 'vendor/htmx-1.9.12/dist/htmx.min.js' %}" defer></script>
+    <script src="{% static 'vendor/htmx.min.js' %}" defer></script>
 </head>
 <body>
 
@@ -65,14 +65,16 @@
             <a class="nav-link" href="/admin/">Админка</a>
         {% endif %}
 
-        <div class="sidebar-logout">
-            <a href="{% url 'logout' %}" aria-label="Выйти из системы">
+        {# Выход — форма POST, а не ссылка: так выйти нельзя заставить с чужого сайта #}
+        <form class="sidebar-logout" method="post" action="{% url 'logout' %}">
+            {% csrf_token %}
+            <button type="submit" aria-label="Выйти из системы">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
                 </svg>
                 Выйти
-            </a>
-        </div>
+            </button>
+        </form>
     </nav>
 
     {# ========================================================================== #}

@@ -67,12 +67,13 @@ body {
     margin-top: auto; padding: 0.75rem 1.1rem;
     border-top: 1px solid #333;
 }
-.sidebar-logout a {
+.sidebar-logout button {
     display: flex; align-items: center; gap: 0.5rem;
-    color: #666; font-size: 0.78rem; text-decoration: none;
+    padding: 0; border: 0; background: none; cursor: pointer;
+    color: #666; font-size: 0.78rem; font-family: inherit;
     transition: color 0.15s;
 }
-.sidebar-logout a:hover { color: #fff; }
+.sidebar-logout button:hover { color: #fff; }
 
 /* Заголовок раздела меню (мелкий капс) */
 .nav-section {

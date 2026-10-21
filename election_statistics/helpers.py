@@ -172,48 +172,14 @@ def _sheet(upload: Any) -> Iterator:
     try:
         yield rows
     finally:
-        # ИСПРАВЛЕНО: Убран rows.close(), так как book.close() в read_only режиме
-        # корректно освобождает все ресурсы и файловые дескрипторы.
+        # book.close() в режиме read_only освобождает и файл, и итератор строк.
         book.close()
 
 
-# def _header(rows: Iterator, wanted: dict) -> dict:
-#     """
-#     Ищет строку с заголовками таблицы в Excel.
-
-#     Описание:
-#         Перебирает строки файла до тех пор, пока не найдет ту, где есть
-#         хотя бы одно совпадение с ожидаемыми заголовками. Поиск регистронезависимый.
-#         Это позволяет корректно читать файлы, где заголовок находится не в первой строке.
-
-#     Аргументы:
-#         rows: итератор строк листа.
-#         wanted: словарь ожидаемых заголовков (например, COLUMNS).
-
-#     Возвращает:
-#         dict: словарь вида {имя_колонки: индекс_в_строке}.
-
-#     Исключения:
-#         ValueError: если ни одна строка не похожа на заголовок.
-#     """
-#     # Создаем словарь для быстрого поиска без учета регистра.
-#     lookup = {name.casefold(): name for name in wanted}
-
-#     for row in rows:
-#         found = {}
-#         for index, cell in enumerate(row):
-#             key = _text(cell).casefold()
-#             if key in lookup:
-#                 found[lookup[key]] = index
-
-#         # Если нашли хотя бы одну колонку, считаем строку заголовком.
-#         if found:
-#             return found
-
-#     raise ValueError(BAD_FORMAT)
-
 def _normalize(s: str) -> str:
+    """Заголовок для сравнения с псевдонимами: без регистра, точек, пробелов и «№»."""
     return re.sub(r"[.\s№]+", "", s.casefold())
+
 
 def _header(rows: Iterator, wanted: dict, aliases: dict | None = None) -> dict:
     """
@@ -242,7 +208,7 @@ def _header(rows: Iterator, wanted: dict, aliases: dict | None = None) -> dict:
     for name, alts in aliases.items():
         for alt in alts:
             aliases_lookup[_normalize(alt)] = name
-    
+
     for row in rows:
         found = {}
         for index, cell in enumerate(row):
@@ -328,7 +294,7 @@ def _apply_border(sheet: Any) -> None:
     Аргументы:
         sheet: объект листа openpyxl.
     """
-    # ИСПРАВЛЕНО: Защита от падения на пустых листах, где max_row и max_column равны None.
+    # На пустом листе max_row и max_column равны None.
     if not sheet.max_row or not sheet.max_column:
         return
 

@@ -4,12 +4,14 @@
 Описание:
     Содержит конфигурацию Django-приложения: подключение приложений,
     настройки базы данных, статики, безопасности и локализации.
-    Внимание: значения, помеченные как "только для разработки",
-    должны быть заменены при развертывании на боевом сервере.
+    Пароли, ключ и адреса серверов в код не пишутся: они берутся из файла .env
+    в корне проекта (в git не попадает, образец — .env.example).
 """
 
 import os
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 # ==============================================================================
 # Базовые пути и безопасность
@@ -18,18 +20,25 @@ from pathlib import Path
 # Корень проекта — папка, в которой лежит файл manage.py.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Секретный ключ для криптографической подписи (сессии, CSRF-токены).
-# ВНИМАНИЕ: В продакшене ключ должен быть уникальным, сложным и храниться
-# в переменных окружения, а не в коде. Текущее значение — только для разработки.
-SECRET_KEY = "django-insecure-%r9ot_pgbi2=6$=i&yt0m@l7i4t4*1=vso8%a7678!lsry4k2k"
+# Переменные окружения из .env (уже заданные в системе имеют приоритет).
+load_dotenv(BASE_DIR / ".env")
 
-# Режим отладки. ВНИМАНИЕ: В продакшене должен быть False.
-# При True показываются подробные ошибки и раздаются статические файлы без кэша.
-DEBUG = True
+# Режим отладки. На сервере — False: подробные ошибки не показываются,
+# статика раздаётся собранной (collectstatic).
+DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
-# Список хостов, с которых разрешено принимать запросы.
-# В продакшене нужно указать доменное имя сервера.
-ALLOWED_HOSTS = ["localhost", "127.0.0.1", "testserver"]
+# Секретный ключ для подписи сессий и CSRF-токенов. На сервере обязателен
+# свой ключ в .env; без него запуск с DEBUG=False остановится с ошибкой.
+SECRET_KEY = (
+    os.getenv("SECRET_KEY", "django-insecure-local-dev-key")
+    if DEBUG
+    else os.environ["SECRET_KEY"]
+)
+
+# Адреса, по которым открывают сайт (через запятую в .env).
+ALLOWED_HOSTS = [
+    host.strip() for host in os.getenv("ALLOWED_HOSTS", "").split(",") if host.strip()
+]
 
 # ==============================================================================
 # Приложения и middleware
@@ -99,17 +108,15 @@ WSGI_APPLICATION = "elections.wsgi.application"
 # База данных
 # ==============================================================================
 
-# Настройки подключения к PostgreSQL.
-# ВНИМАНИЕ: В продакшене учетные данные (USER, PASSWORD) и хост
-# должны быть изменены на безопасные.
+# Подключение к PostgreSQL — значения из .env.
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": "elections_test",
-        "USER": "root",
-        "PASSWORD": "root",
-        "HOST": "localhost",
-        "PORT": "5432",
+        "NAME": os.getenv("DB_NAME", "elections"),
+        "USER": os.getenv("DB_USER", ""),
+        "PASSWORD": os.getenv("DB_PASSWORD", ""),
+        "HOST": os.getenv("DB_HOST", "localhost"),
+        "PORT": os.getenv("DB_PORT", "5432"),
         "OPTIONS": {"client_encoding": "UTF8"},
     }
 }
@@ -189,4 +196,5 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024
 # Тип автоинкрементного первичного ключа по умолчанию для всех моделей.
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-HR_SERVICE_API_URL = "http://localhost:8002/api/employee/"
+# Адрес кадрового API (админка: ФИО по табельному номеру, проверка увольнений).
+HR_SERVICE_API_URL = os.getenv("HR_SERVICE_API_URL", "")

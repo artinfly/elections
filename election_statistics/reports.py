@@ -182,7 +182,6 @@ def production_table() -> Any:
         .annotate(
             people=Count("id"),
             came=Count("id", filter=Q(voted=True)),
-            # proxy=Count("id", filter=Q(voted=True, proxy_vote=True)),
             proxy=Count("id", filter=Q(proxy_vote=True)),
         )
         .order_by()
@@ -610,7 +609,7 @@ def department_report(
     rule = REPORT_MODES[mode]
     moment = moment or timezone.localtime()
 
-    # ИСПРАВЛЕНО: Один агрегирующий запрос вместо двух .count() для снижения нагрузки на БД.
+    # Всего и выполненных — одним запросом.
     stats = Employee.objects.filter(department=department).aggregate(
         total=Count("id"),
         done=Count("id", filter=rule["done"]),
@@ -733,8 +732,7 @@ def department_custom_report(
 
     moment = moment or timezone.localtime()
 
-    # ИСПРАВЛЕНО: Применяем глобальные фильтры конструктора,
-    # а затем ограничиваем выборку конкретным цехом.
+    # Фильтры конструктора, затем ограничение конкретным цехом.
     people = (
         _custom_qs(params)
         .filter(department=department)
@@ -887,8 +885,7 @@ def responsible_marks_archive() -> ReportArchiver:
             sheet.column_dimensions[get_column_letter(index)].width = width
         sheet.freeze_panes = "A2"
 
-        # ИСПРАВЛЕНО: Добавлен .iterator() для экономии оперативной памяти
-        # при большом количестве сотрудников в цехе.
+        # iterator() не держит в памяти весь цех целиком.
         people = (
             Employee.objects.filter(department=department)
             .order_by("surname", "name", "patronymic")

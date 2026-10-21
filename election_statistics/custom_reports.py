@@ -50,7 +50,6 @@ CUSTOM_COLUMNS: list[tuple[str, str, Callable[[Employee], bool]]] = [
     (
         "ДЭГ",
         "Проголосовал (ответственный)",
-        # lambda p: p.proxy_vote and p.voted_method == DEG,
         lambda p: p.proxy_vote and p.method == DEG,
     ),
     # Группа голосования на обычном участке
@@ -63,7 +62,6 @@ CUSTOM_COLUMNS: list[tuple[str, str, Callable[[Employee], bool]]] = [
     (
         "На участке",
         "Проголосовал (ответственный)",
-        # lambda p: p.proxy_vote and p.voted_method == UIK,
         lambda p: p.proxy_vote and p.method == UIK,
     ),
     # Группа голосования на участке УВЗ (на предприятии)
@@ -77,7 +75,6 @@ CUSTOM_COLUMNS: list[tuple[str, str, Callable[[Employee], bool]]] = [
     (
         "На участке УВЗ",
         "Проголосовал (ответственный)",
-        # lambda p: p.proxy_vote and p.voted_method == UVZ,
         lambda p: p.proxy_vote and p.method == UVZ,
     ),
     # Группа 19-го округа
@@ -86,7 +83,6 @@ CUSTOM_COLUMNS: list[tuple[str, str, Callable[[Employee], bool]]] = [
     (
         "УИК-19",
         "Проголосовал (ответственный)",
-        # lambda p: p.proxy_vote and p.voted_method == UIK19,
         lambda p: p.proxy_vote and p.method == UIK19,
     ),
     # Одиночные колонки без группы (имя группы пустое).
@@ -282,8 +278,8 @@ def _custom_groups(
         объединённых заголовков в Excel. Колонки с одинаковым именем группы
         (идущие подряд) объединяются в одну группу.
 
-    ИСПРАВЛЕНО: Колонки с пустым именем группы (одиночные) больше не сливаются
-    между собой, а остаются независимыми столбцами. Это позволяет корректно
+    Колонки с пустым именем группы (одиночные) не сливаются между собой,
+    а остаются независимыми столбцами. Это позволяет корректно
     отображать несколько одиночных колонок подряд (например, "Не определился"
     и "Уважительная причина").
 

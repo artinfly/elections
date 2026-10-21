@@ -36,12 +36,6 @@ urlpatterns = [
     # ==============================================================================
     # Импорт основного списка сотрудников (ФИО, адреса, табельные номера).
     path("upload/base/", views.upload_base, name="upload_base"),
-    # Импорт данных о выборе способа голосования из отчета штаба.
-    path(
-        "upload/voting-choices/",
-        views.upload_voting_choices,
-        name="upload_voting_choices",
-    ),
     # Импорт явки из ZIP-архива отчётов штаба с датой и временем голосования.
     path("upload/turnout-hq/", views.upload_turnout_hq, name="upload_turnout_hq"),
     # Импорт данных из кастомного сводного отчёта (Excel или ZIP с Excel).

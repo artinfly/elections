@@ -461,6 +461,8 @@ class EmployeeAdmin(admin.ModelAdmin):
                         mark_deg=employee.mark_deg,
                         absence=employee.absence,
                         proxy_vote=employee.proxy_vote,
+                        uik_tik=employee.uik_tik,
+                        id_uik=employee.id_uik,
                     )
                     employee.delete()
                 archived_count += 1
@@ -473,7 +475,6 @@ class EmployeeAdmin(admin.ModelAdmin):
                 error_count += 1
 
         skipped = total_selected - len(to_process)
-        # ИСПРАВЛЕНО: Было msg = {...} (множество), теперь f-строка
         msg = (
             f"Проверено {checked_count}. "
             f"Архивировано (уволены): {archived_count}. "

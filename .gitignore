@@ -1,10 +1,19 @@
+# --- Python ---
 .venv/
 __pycache__/
 *.pyc
+
+# --- Django ---
 *.log
-*.xlsx
-.vscode/*
 staticfiles/
-election_statistics/migrations/*
-election_statistics/*_old.py
-election_statistics/*_new.py
+
+# --- Выгрузки пользователей ---
+*.xlsx
+*.zip
+
+# --- Переменные окружения (пароли, ключ, адреса) ---
+.env
+
+# --- Редактор: общие настройки форматирования храним, личные — нет ---
+.vscode/*
+!.vscode/settings.json

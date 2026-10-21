@@ -1,1 +1,1 @@
-default_app_config = "election_statistics.apps.ElectionStatisticsConfig"
+"""Пакет настроек проекта: settings, корневые адреса, точки входа WSGI и ASGI."""
