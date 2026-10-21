@@ -1,0 +1,755 @@
+"""
+Модуль генерации кастомных (динамических) отчётов по фильтрам конструктора.
+
+Описание:
+    Содержит логику создания сводных отчётов, настраиваемых пользователем
+    через форму фильтров. Включает отчёт "по людям" (каждый сотрудник строкой)
+    и отчёт "по производствам" (агрегированные данные).
+    Вся бизнес-логика отображения галочек в колонках сосредоточена в списке CUSTOM_COLUMNS.
+"""
+
+from collections import defaultdict
+from datetime import datetime
+from typing import Any, Callable, Optional
+
+import openpyxl
+from django.db.models import QuerySet
+from django.utils import timezone
+from openpyxl.styles import Alignment, Font
+from openpyxl.utils import get_column_letter
+from openpyxl.workbook import Workbook
+
+from ...models import DEG, UIK, UIK19, UVZ, Employee
+from ..excel import (
+    NO_PRODUCTION,
+    _apply_border,
+    _by_number,
+    _format_with_percent,
+    padded_number,
+)
+
+# ==============================================================================
+# Конфигурация колонок сводного отчёта
+# ==============================================================================
+
+# Список колонок отчёта в формате: (Имя группы, Имя подколонки, Предикат-проверка).
+#
+# Структура:
+#   - Имя группы: название группы колонок (например, "ДЭГ", "На участке").
+#     Пустая строка означает одиночную колонку без общего заголовка.
+#   - Имя подколонки: название конкретной колонки внутри группы.
+#   - Предикат: функция, принимающая объект Employee и возвращающая True,
+#     если для сотрудника нужно поставить отметку "+" в этой колонке.
+#
+# ВАЖНО: Если бизнес-логика колонки изменится, править нужно ТОЛЬКО этот список.
+# Не нужно менять функции отрисовки или подсчёта — они автоматически адаптируются.
+CUSTOM_COLUMNS: list[tuple[str, str, Callable[[Employee], bool]]] = [
+    # Группа ДЭГ (дистанционное электронное голосование)
+    ("ДЭГ", "Планирует", lambda p: p.method == DEG),
+    ("ДЭГ", "Проголосовал (QR-код)", lambda p: p.voted and p.voted_method == DEG),
+    (
+        "ДЭГ",
+        "Проголосовал (ответственный)",
+        lambda p: p.proxy_vote and p.method == DEG,
+    ),
+    # Группа голосования на обычном участке
+    ("На участке", "Планирует", lambda p: p.method == UIK),
+    (
+        "На участке",
+        "Проголосовал (QR-код)",
+        lambda p: p.voted and p.voted_method == UIK,
+    ),
+    (
+        "На участке",
+        "Проголосовал (ответственный)",
+        lambda p: p.proxy_vote and p.method == UIK,
+    ),
+    # Группа голосования на участке УВЗ (на предприятии)
+    ("На участке УВЗ", "Планирует", lambda p: p.method == UVZ),
+    ("На участке УВЗ", "Заявление оформил", lambda p: p.method == UVZ and p.mark_uvz),
+    (
+        "На участке УВЗ",
+        "Проголосовал (QR-код)",
+        lambda p: p.voted and p.voted_method == UVZ,
+    ),
+    (
+        "На участке УВЗ",
+        "Проголосовал (ответственный)",
+        lambda p: p.proxy_vote and p.method == UVZ,
+    ),
+    # Группа 19-го округа
+    ("УИК-19", "Планирует", lambda p: p.method == UIK19),
+    ("УИК-19", "Проголосовал (QR-код)", lambda p: p.voted and p.voted_method == UIK19),
+    (
+        "УИК-19",
+        "Проголосовал (ответственный)",
+        lambda p: p.proxy_vote and p.method == UIK19,
+    ),
+    # Одиночные колонки без группы (имя группы пустое).
+    # "Не определился" — сотрудник не выбрал способ.
+    # "Отсутствовал по УП" — сотрудник отметил уважительную причину отсутствия.
+    (
+        "",
+        "Не определился",
+        lambda p: p.method not in (DEG, UIK, UVZ, UIK19) and not p.absence,
+    ),
+    ("", "Уважительная причина", lambda p: p.absence),
+]
+
+
+# Предикат "Планирует" для каждой группы способов голосования, полученный
+# из CUSTOM_COLUMNS (без дублирования логики). Используется, чтобы считать
+# процент по колонкам "Проголосовал (QR-код)" и "Проголосовал (ответственный)"
+# не от общего числа людей, а от числа людей, планирующих голосовать этим
+# способом — отдельно для каждой группы.
+GROUP_PLAN_PREDICATE: dict[str, Callable[[Employee], bool]] = {
+    group: predicate for group, sub, predicate in CUSTOM_COLUMNS if sub == "Планирует"
+}
+
+
+def _percent_denominator_groups(
+    short: bool = False, with_total: bool = True
+) -> list[Optional[str]]:
+    """
+    Возвращает список, параллельный списку предикатов из _custom_groups.
+
+    Описание:
+        Для каждой колонки отчёта указывает, как считать процент в итоговых
+        строках:
+          - имя группы (например, "ДЭГ") — значит, процент для этой колонки
+            нужно считать не от общего количества людей, а от количества
+            людей, у которых сработал предикат "Планирует" этой же группы
+            (см. GROUP_PLAN_PREDICATE). Так помечаются колонки
+            "Проголосовал (QR-код)" и "Проголосовал (ответственный)".
+          - None — процент считается как раньше, от общего количества людей
+            (все остальные колонки, включая саму "Планирует" и "Всего").
+
+    Аргументы:
+        short: сокращённый набор колонок (см. _get_custom_columns).
+        with_total: добавлять ли колонку "Всего" в сокращённом режиме.
+
+    Возвращает:
+        list: список той же длины и порядка, что и предикаты из
+            _custom_groups(short, with_total).
+    """
+    bases: list[Optional[str]] = []
+    for group, subs in _custom_groups(short, with_total):
+        for sub, _predicate in subs:
+            if (
+                sub in ("Проголосовал (QR-код)", "Проголосовал (ответственный)")
+                and group in GROUP_PLAN_PREDICATE
+            ):
+                bases.append(group)
+            else:
+                bases.append(None)
+    return bases
+
+
+def _get_custom_columns(
+    short: bool = False, with_total: bool = True
+) -> list[tuple[str, str, Callable[[Employee], bool]]]:
+    """
+    Возвращает список колонок отчёта — полный или сокращённый.
+
+    Описание:
+        При short=True в каждой группе способов голосования остаётся только
+        по две подколонки:
+          - ДЭГ: "Планирует" и "Проголосовал (QR-код)";
+          - На участке: "Планирует" и "Проголосовал (QR-код)";
+          - На участке УВЗ: "Заявление оформил" и "Проголосовал (QR-код)";
+          - УИК-19: "Планирует" и "Проголосовал (QR-код)".
+        Одиночные колонки "Не определился" и "Уважительная причина" убираются.
+
+        Если with_total=True (в любом режиме, коротком или полном), последней
+        добавляется колонка "Всего" — предикат p.voted. В отчёте "по людям"
+        (см. custom_report) она не нужна и явно отключается (with_total=False).
+        В отчёте "по производствам" (см. custom_production_summary) она нужна
+        всегда: при разбивке по цехам колонка "Всего" считается по каждому
+        цеху отдельно, а строка "Итого"/"Всего по Обществу" просто суммирует
+        цеха — как и любая другая колонка-предикат, без специальной логики.
+        Поскольку строка ИТОГО считает проценты через
+        _format_with_percent(значение, total_people), эта колонка
+        автоматически покажет процент проголосовавших от общего числа
+        сотрудников (или от числа людей в цехе/производстве — в зависимости
+        от отчёта).
+
+    Аргументы:
+        short: включает сокращённый режим колонок (см. описание выше).
+        with_total: добавлять ли колонку "Всего" последней колонкой — и в
+            коротком, и в полном режиме.
+
+    Возвращает:
+        list: список кортежей (имя_группы, имя_подколонки, предикат).
+    """
+    if not short:
+        columns = list(CUSTOM_COLUMNS)
+        if with_total:
+            columns.append(("", "Всего", lambda p: p.voted))
+        return columns
+
+    allowed_subs_by_group = {
+        "ДЭГ": {"Планирует", "Проголосовал (QR-код)"},
+        "На участке": {"Планирует", "Проголосовал (QR-код)"},
+        "На участке УВЗ": {"Заявление оформил", "Проголосовал (QR-код)"},
+        "УИК-19": {"Планирует", "Проголосовал (QR-код)"},
+    }
+    columns = [
+        (group, sub, predicate)
+        for group, sub, predicate in CUSTOM_COLUMNS
+        if sub in allowed_subs_by_group.get(group, set())
+    ]
+    if with_total:
+        columns.append(("", "Всего", lambda p: p.voted))
+    return columns
+
+
+# ==============================================================================
+# Фильтрация и заголовки
+# ==============================================================================
+
+
+def _custom_qs(params: dict) -> QuerySet:
+    """
+    Строит QuerySet сотрудников на основе параметров формы конструктора.
+
+    Описание:
+        Применяет фильтры, выбранные пользователем (производство, цех, способ,
+        округ, УИК и т.д.), к общему списку сотрудников. Поддерживает специальные
+        значения фильтров, такие как "Пусто" (none) и "20+21".
+
+    Аргументы:
+        params: словарь параметров из запроса (production, service, dep, method,
+            where, okrug, uik).
+
+    Возвращает:
+        QuerySet: отфильтрованный список сотрудников.
+    """
+    qs = Employee.objects.all()
+
+    production = (params.get("production") or "").strip()
+    dep = (params.get("dep") or "").strip()
+    method = (params.get("method") or "").strip()
+    where = (params.get("where") or "").strip()
+    okrug = (params.get("okrug") or "").strip()
+    uik = (params.get("uik") or "").strip()
+    service = (params.get("service") or "").strip()
+
+    if production:
+        qs = qs.filter(production=production)
+    if service:
+        qs = qs.filter(service=service)
+    if dep:
+        qs = qs.filter(department=dep)
+
+    # Фильтр по запланированному способу голосования.
+    if method == "none":
+        qs = qs.filter(method="")
+    elif method:
+        qs = qs.filter(method=method)
+
+    # Фильтр по фактическому месту голосования.
+    if where == "none":
+        qs = qs.filter(voted_method="")
+    elif where:
+        qs = qs.filter(voted_method=where)
+
+    # Фильтр по избирательному округу.
+    if okrug == "none":
+        qs = qs.filter(okrug="")
+    elif okrug == "20+21":
+        qs = qs.filter(okrug__in=["20", "21"])
+    elif okrug:
+        qs = qs.filter(okrug=okrug)
+
+    if uik:
+        qs = qs.filter(uik=uik)
+
+    return qs
+
+
+def _custom_groups(
+    short: bool = False, with_total: bool = True
+) -> list[tuple[str, list[tuple[str, Callable]]]]:
+    """
+    Группирует колонки из CUSTOM_COLUMNS (или сокращённого набора) по имени группы.
+
+    Описание:
+        Преобразует плоский список колонок в иерархическую структуру для отрисовки
+        объединённых заголовков в Excel. Колонки с одинаковым именем группы
+        (идущие подряд) объединяются в одну группу.
+
+    Колонки с пустым именем группы (одиночные) не сливаются между собой,
+    а остаются независимыми столбцами. Это позволяет корректно
+    отображать несколько одиночных колонок подряд (например, "Не определился"
+    и "Уважительная причина").
+
+    Аргументы:
+        short: если True, используется сокращённый набор колонок из
+            _get_custom_columns (см. её описание).
+        with_total: добавлять ли колонку "Всего" в сокращённом режиме
+            (передаётся в _get_custom_columns).
+
+    Возвращает:
+        list: список кортежей (имя_группы, [(имя_подколонки, предикат), ...]).
+    """
+    groups = []
+    for group, sub, predicate in _get_custom_columns(short, with_total):
+        # Пустая группа означает одиночную колонку без общего заголовка.
+        # Такие колонки не должны объединяться с другими пустыми группами.
+        if not group:
+            groups.append((group, [(sub, predicate)]))
+        # Если текущая колонка принадлежит той же группе, что и предыдущая,
+        # добавляем её в конец списка подколонок этой группы.
+        elif groups and groups[-1][0] == group:
+            groups[-1][1].append((sub, predicate))
+        else:
+            # Иначе создаём новую группу.
+            groups.append((group, [(sub, predicate)]))
+    return groups
+
+
+def _draw_custom_groups(
+    sheet: Any,
+    start_row: int,
+    start_col: int,
+    short: bool = False,
+    with_total: bool = True,
+) -> list[Callable]:
+    """
+    Отрисовывает объединённые заголовки групп и подколонки в листе Excel.
+
+    Описание:
+        Рисует шапку отчёта. Группы колонок объединяются по горизонтали в верхней строке.
+        Подколонки рисуются во второй строке. Если имя группы пустое (одиночная колонка),
+        ячейка объединяется по вертикали на две строки.
+
+    Аргументы:
+        sheet: объект листа openpyxl.
+        start_row: номер строки, с которой начинается шапка.
+        start_col: номер колонки, с которой начинается шапка.
+        short: если True, используется сокращённый набор колонок
+            (см. _get_custom_columns).
+        with_total: добавлять ли колонку "Всего" в сокращённом режиме.
+
+    Возвращает:
+        list: список предикатов в порядке их следования в колонках листа.
+    """
+    bold = Font(bold=True)
+    centered = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    column = start_col
+    predicates = []
+
+    for group, subs in _custom_groups(short, with_total):
+        start, end = column, column + len(subs) - 1
+
+        if group:
+            # Объединяем ячейки для имени группы по горизонтали.
+            sheet.merge_cells(
+                start_row=start_row,
+                start_column=start,
+                end_row=start_row,
+                end_column=end,
+            )
+            head = sheet.cell(start_row, column, group)
+        else:
+            # Для одиночной колонки (пустая группа) объединяем по вертикали.
+            sheet.merge_cells(
+                start_row=start_row,
+                start_column=start,
+                end_row=start_row + 1,
+                end_column=end,
+            )
+            head = sheet.cell(start_row, column, subs[0][0])
+
+        head.font = bold
+        head.alignment = centered
+
+        # Отрисовка подколонок и сбор предикатов.
+        for sub, predicate in subs:
+            if group:
+                cell = sheet.cell(start_row + 1, column, sub)
+                cell.font = bold
+                cell.alignment = centered
+            predicates.append(predicate)
+            column += 1
+
+    return predicates
+
+
+# ==============================================================================
+# Отчёты
+# ==============================================================================
+
+
+def custom_report(params: dict, short: bool = False) -> Workbook:
+    """
+    Генерирует сводный Excel-отчёт "По людям" на основе фильтров.
+
+    Описание:
+        Выводит каждого сотрудника отдельной строкой. В колонках проставляются
+        отметки "+" в соответствии с предикатами из CUSTOM_COLUMNS.
+        В конце добавляется строка ИТОГО с количеством и процентами.
+
+    Аргументы:
+        params: параметры фильтров конструктора.
+        short: если True, для каждого способа голосования оставляются только
+            две подколонки (см. _get_custom_columns), а колонки
+            "Не определился" и "Уважительная причина" убираются без замены —
+            колонка "Всего" в этом отчёте не нужна, так как у него нет
+            общей итоговой строки с процентами по каждому сотруднику.
+
+    Возвращает:
+        Workbook: книга openpyxl с готовым отчётом.
+    """
+    people = _custom_qs(params).order_by(
+        "department", "surname", "name", "patronymic", "uik"
+    )
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "Сводный отчёт"
+    bold = Font(bold=True)
+    centered = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    # Ведущие колонки (основная информация о сотруднике).
+    column = 1
+    for title in ("Номер УИК", "Цех", "Таб.№", "ФИО", "Округ"):
+        sheet.merge_cells(
+            start_row=1, start_column=column, end_row=2, end_column=column
+        )
+        cell = sheet.cell(1, column, title)
+        cell.font = bold
+        cell.alignment = centered
+        column += 1
+
+    # Отрисовка динамических колонок и получение списка предикатов.
+    # Колонка "Всего" в этом отчёте не нужна (with_total=False).
+    predicates = _draw_custom_groups(
+        sheet, start_row=1, start_col=column, short=short, with_total=False
+    )
+
+    # Настройка ширины колонок.
+    widths = (10, 8, 10, 42, 8) + (12,) * len(predicates)
+    for index, width in enumerate(widths, 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+
+    # Фиксация заголовков при прокрутке.
+    sheet.freeze_panes = "A3"
+
+    # Список, параллельный predicates: для каких колонок процент в строке
+    # ИТОГО нужно считать не от total_people, а от количества "Планирует"
+    # соответствующей группы (см. GROUP_PLAN_PREDICATE).
+    percent_denominator_groups = _percent_denominator_groups(short, with_total=False)
+
+    row = 3
+    totals = [0] * len(predicates)
+    total_people = 0
+    # Счётчики "Планирует" по каждой группе способов голосования —
+    # нужны как знаменатель процента для колонок "Проголосовал (QR-код)".
+    plan_counts: dict[str, int] = defaultdict(int)
+
+    # Итератор с пачками по 2000 строк защищает от переполнения памяти.
+    for person in people.iterator(chunk_size=2000):
+        total_people += 1
+        sheet.cell(row, 1, person.uik)
+        sheet.cell(row, 2, person.department)
+        sheet.cell(row, 3, person.tab_number)
+        sheet.cell(row, 4, person.fio)
+        sheet.cell(row, 5, person.okrug)
+
+        # Простановка отметок в колонках.
+        for offset, predicate in enumerate(predicates):
+            if predicate(person):
+                sheet.cell(row, 6 + offset, "+")
+                totals[offset] += 1
+
+        for group, plan_predicate in GROUP_PLAN_PREDICATE.items():
+            if plan_predicate(person):
+                plan_counts[group] += 1
+        row += 1
+
+    # Строка ИТОГО.
+    sheet.cell(row, 1, "ИТОГО").font = bold
+    sheet.cell(row, 2, total_people).font = bold
+    sheet.cell(row, 2).alignment = centered
+
+    for offset, total in enumerate(totals):
+        denom_group = percent_denominator_groups[offset]
+        denom = plan_counts[denom_group] if denom_group else total_people
+        cell = sheet.cell(row, 6 + offset, _format_with_percent(total, denom))
+        cell.font = bold
+        cell.alignment = centered
+
+    _apply_border(sheet)
+    return book
+
+
+def custom_production_summary(
+    params: dict,
+    include_depts: bool = False,
+    moment: Optional[datetime] = None,
+    short: bool = False,
+) -> Workbook:
+    """
+    Генерирует сводный отчёт с группировкой по производствам.
+
+    Описание:
+        Агрегирует данные по производствам (опционально с разбивкой по цехам).
+        Показывает количество сотрудников по каждому производству и процентные
+        соотношения по колонкам из конструктора.
+
+        ВАЖНО: Использует поле service для группировки по производствам,
+        а не production. Это историческое несоответствие, см. reports/standard.py.
+
+    Аргументы:
+        params: параметры фильтров конструктора.
+        include_depts: если True, выводит строки по цехам внутри каждого производства.
+        moment: момент времени для заголовка отчёта.
+        short: если True, для каждого способа голосования оставляются только
+            подколонки "Планирует" и "Проголосовал (QR-код)", а колонки
+            "Не определился" и "Уважительная причина" заменяются одной
+            колонкой "Всего" — в строках "Итого"/"Всего по Обществу" она
+            покажет процент проголосовавших от общего числа сотрудников.
+            Если False (полный режим), колонки "Проголосовал (QR-код)" и
+            "Проголосовал (ответственный)" в КАЖДОЙ строке (цеха или
+            производства, а не только в итоговых) показывают не голое
+            число, а процент от числа людей, планирующих голосовать этим
+            же способом в рамках этой строки (см. GROUP_PLAN_PREDICATE).
+            Колонка "Всего" в этом же режиме тоже показывает в каждой
+            строке процент — но от общего числа людей в цехе/производстве
+            этой строки (не от "Планирует").
+
+    Возвращает:
+        Workbook: книга openpyxl со сводным отчётом.
+    """
+    moment = moment or timezone.localtime()
+
+    # Группировка и сортировка приведены к полю service.
+    # Это обеспечивает единообразие со стандартными отчётами "по производствам"
+    # в reports/standard.py, которые исторически используют поле service.
+    people = _custom_qs(params).order_by(
+        "service", "department", "surname", "name", "patronymic"
+    )
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "Сводный отчёт"
+    bold = Font(bold=True)
+    centered = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    # Собираем плоский список всех предикатов для отчёта, а также имена
+    # подколонок (нужны, чтобы найти среди них колонку "Всего").
+    predicates = []
+    column_subs = []
+    for group, subs in _custom_groups(short):
+        for sub, predicate in subs:
+            predicates.append(predicate)
+            column_subs.append(sub)
+
+    # Список, параллельный predicates: для каких колонок процент нужно
+    # считать не от общего числа людей, а от количества "Планирует"
+    # соответствующей группы (см. GROUP_PLAN_PREDICATE).
+    percent_denominator_groups = _percent_denominator_groups(short, with_total=True)
+
+    # Заголовки ведущих колонок.
+    lead_headers = (
+        ("Производство", "Цех", "Всего") if include_depts else ("Производство", "Всего")
+    )
+    total_columns = len(lead_headers) + len(predicates)
+
+    # Главный заголовок отчёта.
+    title = sheet.cell(
+        1, 1, f"Итоговый отчёт по видам производства на {moment:%d.%m.%y %H:%M}"
+    )
+    title.font = Font(bold=True, size=12)
+    title.alignment = centered
+    sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_columns)
+
+    # Отрисовка заголовков колонок.
+    header_row = 2
+    column = 1
+    for title_text in lead_headers:
+        sheet.merge_cells(
+            start_row=header_row,
+            start_column=column,
+            end_row=header_row + 1,
+            end_column=column,
+        )
+        cell = sheet.cell(header_row, column, title_text)
+        cell.font = bold
+        cell.alignment = centered
+        column += 1
+
+    _draw_custom_groups(sheet, start_row=header_row, start_col=column, short=short)
+
+    # Настройка ширины колонок.
+    widths = (
+        (16, 14, 10) + (12,) * len(predicates)
+        if include_depts
+        else (24, 10) + (12,) * len(predicates)
+    )
+    for index, width in enumerate(widths, 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+
+    sheet.freeze_panes = "A4"
+
+    # Группировка данных в памяти для быстрого агрегирования.
+    if include_depts:
+        data = defaultdict(lambda: defaultdict(list))
+    else:
+        data = defaultdict(list)
+
+    # Итератор с пачками по 2000 строк защищает от переполнения памяти.
+    for person in people.iterator(chunk_size=2000):
+        # Используем поле service для определения производства,
+        # чтобы соответствовать стандартным отчётам.
+        production_name = person.service or NO_PRODUCTION
+        if include_depts:
+            data[production_name][person.department].append(person)
+        else:
+            data[production_name].append(person)
+
+    row = header_row + 2
+    grand_total_people = 0
+    grand_totals = [0] * len(predicates)
+    # Счётчики "Планирует" по каждой группе способов голосования (для всего
+    # общества) — знаменатель процента для колонок "Проголосовал (QR-код)".
+    grand_plan_counts: dict[str, int] = defaultdict(int)
+
+    # Сортировка производств: обычные по алфавиту, "Без производства" всегда в конце.
+    for production in sorted(
+        data.keys(), key=lambda name: (name == NO_PRODUCTION, name)
+    ):
+        if include_depts:
+            # Заголовок производства (объединяем все колонки).
+            sheet.merge_cells(
+                start_row=row, start_column=1, end_row=row, end_column=total_columns
+            )
+            sheet.cell(row, 1, production).font = bold
+            sheet.cell(row, 1).alignment = Alignment(horizontal="center")
+            row += 1
+
+            prod_total_people = 0
+            prod_totals = [0] * len(predicates)
+            # Счётчики "Планирует" по каждой группе — знаменатель процента
+            # для колонок "Проголосовал (QR-код)" в рамках производства.
+            prod_plan_counts: dict[str, int] = defaultdict(int)
+
+            # Сортировка цехов внутри производства.
+            for department in sorted(data[production].keys(), key=_by_number):
+                persons = data[production][department]
+                count = len(persons)
+                prod_total_people += count
+                grand_total_people += count
+
+                sheet.cell(row, 1, production)
+                sheet.cell(row, 2, padded_number(department))
+                sheet.cell(row, 3, count).alignment = Alignment(horizontal="center")
+
+                # Локальные счётчики "Планирует" по этому цеху — нужны, чтобы
+                # в полном режиме (short=False) показать в самой строке цеха
+                # процент "проголосовало из планирующих", а не голое число.
+                dept_plan_counts: dict[str, int] = {}
+                for group, plan_predicate in GROUP_PLAN_PREDICATE.items():
+                    plan_val = sum(1 for p in persons if plan_predicate(p))
+                    dept_plan_counts[group] = plan_val
+                    prod_plan_counts[group] += plan_val
+                    grand_plan_counts[group] += plan_val
+
+                # Подсчёт значений по предикатам для данного цеха.
+                for offset, predicate in enumerate(predicates):
+                    val = sum(1 for p in persons if predicate(p))
+                    if val > 0:
+                        denom_group = percent_denominator_groups[offset]
+                        if not short and denom_group:
+                            cell_value = _format_with_percent(
+                                val, dept_plan_counts[denom_group]
+                            )
+                        elif not short and column_subs[offset] == "Всего":
+                            cell_value = _format_with_percent(val, count)
+                        else:
+                            cell_value = val
+                        sheet.cell(row, 4 + offset, cell_value).alignment = Alignment(
+                            horizontal="center"
+                        )
+                    prod_totals[offset] += val
+                    grand_totals[offset] += val
+                row += 1
+
+            # Строка Итого по производству.
+            sheet.cell(row, 2, "Итого").font = bold
+            sheet.cell(row, 3, prod_total_people).font = bold
+            sheet.cell(row, 3).alignment = Alignment(horizontal="center")
+            for offset, val in enumerate(prod_totals):
+                denom_group = percent_denominator_groups[offset]
+                denom = (
+                    prod_plan_counts[denom_group] if denom_group else prod_total_people
+                )
+                cell = sheet.cell(row, 4 + offset, _format_with_percent(val, denom))
+                cell.font = bold
+                cell.alignment = centered
+            row += 1
+        else:
+            # Режим без разбивки по цехам.
+            persons = data[production]
+            count = len(persons)
+            grand_total_people += count
+
+            sheet.cell(row, 1, production)
+            sheet.cell(row, 2, count).alignment = Alignment(horizontal="center")
+
+            # Локальные счётчики "Планирует" по этому производству — та же
+            # логика, что и для цеха выше.
+            local_plan_counts: dict[str, int] = {}
+            for group, plan_predicate in GROUP_PLAN_PREDICATE.items():
+                plan_val = sum(1 for p in persons if plan_predicate(p))
+                local_plan_counts[group] = plan_val
+                grand_plan_counts[group] += plan_val
+
+            for offset, predicate in enumerate(predicates):
+                val = sum(1 for p in persons if predicate(p))
+                if val > 0:
+                    denom_group = percent_denominator_groups[offset]
+                    if not short and denom_group:
+                        cell_value = _format_with_percent(
+                            val, local_plan_counts[denom_group]
+                        )
+                    elif not short and column_subs[offset] == "Всего":
+                        cell_value = _format_with_percent(val, count)
+                    else:
+                        cell_value = val
+                    sheet.cell(row, 3 + offset, cell_value).alignment = Alignment(
+                        horizontal="center"
+                    )
+                grand_totals[offset] += val
+            row += 1
+
+    # Строка Всего по Обществу.
+    if include_depts:
+        sheet.cell(row, 2, "Всего по Обществу").font = bold
+        sheet.cell(row, 3, grand_total_people).font = bold
+        sheet.cell(row, 3).alignment = Alignment(horizontal="center")
+        for offset, val in enumerate(grand_totals):
+            denom_group = percent_denominator_groups[offset]
+            denom = (
+                grand_plan_counts[denom_group] if denom_group else grand_total_people
+            )
+            cell = sheet.cell(row, 4 + offset, _format_with_percent(val, denom))
+            cell.font = bold
+            cell.alignment = centered
+    else:
+        sheet.cell(row, 1, "Всего по Обществу").font = bold
+        sheet.cell(row, 2, grand_total_people).font = bold
+        sheet.cell(row, 2).alignment = Alignment(horizontal="center")
+        for offset, val in enumerate(grand_totals):
+            denom_group = percent_denominator_groups[offset]
+            denom = (
+                grand_plan_counts[denom_group] if denom_group else grand_total_people
+            )
+            cell = sheet.cell(row, 3 + offset, _format_with_percent(val, denom))
+            cell.font = bold
+            cell.alignment = centered
+
+    _apply_border(sheet)
+    return book

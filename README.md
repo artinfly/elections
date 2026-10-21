@@ -21,7 +21,7 @@
 ## Стек
 
 Python 3.13, Django 6, PostgreSQL, openpyxl, whitenoise, htmx. Фронтенд без
-сборки: Bootstrap и htmx лежат файлами в `election_statistics/static/vendor/`.
+сборки: Bootstrap и htmx лежат файлами в `core/static/vendor/`.
 
 ## Быстрый старт
 
@@ -40,7 +40,7 @@ python manage.py runserver
 
 ## Настройки
 
-Пароли, ключ и адреса в код не пишутся: `elections/settings.py` берёт их из
+Пароли, ключ и адреса в код не пишутся: `config/settings.py` берёт их из
 файла `.env` (в git не попадает, образец — `.env.example`).
 
 | Переменная | Что это |
@@ -52,33 +52,46 @@ python manage.py runserver
 | `HR_SERVICE_API_URL` | адрес кадрового API для админки |
 
 При `DEBUG=False` статику раздаёт whitenoise, её нужно собрать:
-`python manage.py collectstatic`.
+`python manage.py collectstatic`. Точка входа для веб-сервера — `config.wsgi`.
 
 ## Структура
 
 ```text
-elections/                    настройки, корневые адреса, wsgi/asgi
-
-election_statistics/
+config/                       настройки проекта: settings, корневые адреса, wsgi/asgi
+core/                         приложение «Учёт голосования»
 ├── models.py                 Employee, EmployeeArchive, Profile; коды способов
+├── admin.py                  админка: сотрудники, архив уволенных, пользователи
 ├── urls.py                   маршруты
-├── views.py                  страницы, фильтры, API отметок, загрузка, выгрузка
-├── importers.py              импорт Excel и ZIP: сотрудники, явка, отметки
-├── helpers.py                чтение xlsx, общие константы и утилиты
-├── reports.py                стандартные отчёты и архивы по цехам
-├── custom_reports.py         конструктор отчёта по фильтрам (CUSTOM_COLUMNS)
-├── vn_reports.py             отчёт по производствам в формате ВН
-├── uvz_reports.py            «заявление на УИК-УВЗ оформлено, но не проголосовал»
-├── admin.py                  админка: сотрудники, архив, пользователи, кадровый API
 ├── signals.py                профиль для нового пользователя
-├── management/commands/
-│   ├── setup_groups.py       создание группы operator
-│   └── import_workshops.py   справочник «цех — производство» из внешней базы
+├── views/                    обработчики запросов
+│   ├── common.py             роли, фильтр сотрудников, счётчики плашек
+│   ├── pages.py              страницы: способ, голосование, загрузка, отчёты
+│   ├── uploads.py            приём файлов (только оператор)
+│   ├── api.py                отметки без перезагрузки страницы
+│   ├── exports.py            выгрузки Excel и ZIP
+│   └── auth.py               вход и выход
+├── services/                 логика без HTTP
+│   ├── excel.py              чтение xlsx, общие константы и утилиты
+│   ├── importing.py          импорт: сотрудники, явка, кастомный отчёт, отметки
+│   ├── archiver.py           ReportArchiver: сборка книг Excel в ZIP в памяти
+│   └── reports/
+│       ├── standard.py       сводки, отчёты по производствам, архивы по цехам
+│       ├── custom.py         конструктор отчёта по фильтрам (CUSTOM_COLUMNS)
+│       ├── vn.py             отчёт по производствам в формате ВН
+│       └── uvz.py            «заявление на УИК-УВЗ оформлено, но не проголосовал»
+├── management/commands/      setup_groups, import_workshops
+├── migrations/
 ├── templates/
-└── static/                   стили, скрипты, Bootstrap и htmx (vendor/)
-
-utils/archiver.py             ReportArchiver: сборка книг Excel в ZIP в памяти
+│   ├── base.html, login.html
+│   ├── pages/                страницы сайта
+│   ├── partials/             подключаемые части: фильтры, пагинация
+│   └── admin/                доработанные формы пользователя в админке
+└── static/                   css/, js/, vendor/ (Bootstrap, htmx), admin/js/
 ```
+
+Внутреннее имя приложения в Django (`label`) — `election_statistics`: от него
+зависят имена таблиц в базе, поэтому оно сохранено при переименовании папки
+(см. `core/apps.py`).
 
 ## Страницы
 

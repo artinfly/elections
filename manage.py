@@ -20,7 +20,7 @@ def main():
     # setdefault, а не "=": значение из внешнего окружения имеет приоритет.
     # Это позволяет запускать проект с альтернативными настройками,
     # выставив DJANGO_SETTINGS_MODULE вручную.
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "elections.settings")
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:
