@@ -2,9 +2,10 @@
 Модуль описания структуры базы данных (моделей).
 
 Модели:
-    Employee — сотрудник: данные, участок, способ голосования, явка, отметки;
+    EmployeeBase — общие поля сотрудника (абстрактная, без своей таблицы);
+    Employee — работающий сотрудник: данные, участок, способ, явка, отметки;
     EmployeeArchive — уволенные сотрудники (переносятся из админки после
-        проверки в кадровом API), та же структура полей;
+        проверки в кадровом API), те же поля;
     Profile — данные пользователя системы из кадрового API (отчество, API-ключ).
 Здесь же определены константы способов голосования, которые используются
 во всех частях системы: от импорта данных до генерации Excel-отчетов.
@@ -36,15 +37,15 @@ METHODS = [
 METHOD_LABELS = dict(METHODS)
 
 
-class Employee(models.Model):
+class EmployeeBase(models.Model):
     """
-    Модель сотрудника.
+    Общие поля сотрудника — для работающих (Employee) и уволенных (EmployeeArchive).
 
     Описание:
-        Основная таблица: персональные данные,
-        адрес регистрации, привязку к избирательному участку (УИК) и округу.
-        Также содержит поля для учета плана голосования, фактической явки
-        и служебных отметок (открепление, отсутствие).
+        Персональные данные, адрес регистрации, привязка к избирательному участку
+        (УИК) и округу, план голосования, фактическая явка и служебные отметки.
+        Абстрактная модель: своей таблицы в базе у неё нет, поля попадают
+        в таблицы наследников.
     """
 
     # --- Идентификация и организационная структура ---
@@ -131,15 +132,18 @@ class Employee(models.Model):
     # Отметка об отсутствии по уважительной причине (УП).
     absence = models.BooleanField("Отсутствие по УП", default=False)
 
-    uik_tik = models.IntegerField("УИК ТИК", null=True, blank=True)
-    id_uik = models.IntegerField("ID УИК", null=True, blank=True)
+    # Отметка «Голосование через ответственного» (загружается файлом со страницы
+    # «Загрузка данных»); учитывается в отчётах отдельно от явки по QR-коду.
     proxy_vote = models.BooleanField(
         "Голосование через ответственного", default=False, db_index=True
     )
 
+    # Номер территориальной комиссии и идентификатор участка из выгрузки штаба.
+    uik_tik = models.IntegerField("УИК ТИК", null=True, blank=True)
+    id_uik = models.IntegerField("ID УИК", null=True, blank=True)
+
     class Meta:
-        verbose_name = "Сотрудник"
-        verbose_name_plural = "Сотрудники"
+        abstract = True
         # Сортировка записей по умолчанию (по алфавиту ФИО).
         # Внимание: при использовании .values().annotate() эту сортировку нужно
         # принудительно сбрасывать через .order_by(), иначе Django добавит поля
@@ -199,6 +203,28 @@ class Employee(models.Model):
         return f"{self.tab_number} {self.fio}"
 
 
+class Employee(EmployeeBase):
+    """Работающий сотрудник: основная таблица страниц, загрузок и отчётов."""
+
+    class Meta(EmployeeBase.Meta):
+        verbose_name = "Сотрудник"
+        verbose_name_plural = "Сотрудники"
+
+
+class EmployeeArchive(EmployeeBase):
+    """
+    Архив уволенных сотрудников.
+
+    Запись переносится сюда действием админки «Проверить увольнения», если
+    кадровый API отвечает, что человек уволен; из основной таблицы он при этом
+    удаляется и в отчёты больше не попадает.
+    """
+
+    class Meta(EmployeeBase.Meta):
+        verbose_name = "Сотрудник (уволен)"
+        verbose_name_plural = "Сотрудники (уволенные)"
+
+
 class Profile(models.Model):
     """
     Данные пользователя системы из кадрового API.
@@ -221,77 +247,3 @@ class Profile(models.Model):
     def __str__(self):
         """Подпись в админке: логин пользователя."""
         return f"Profile({self.user.username})"
-
-
-class EmployeeArchive(models.Model):
-    """
-    Архив уволенных сотрудников.
-
-    Поля повторяют Employee. Запись переносится сюда действием админки
-    «Проверить увольнения», если кадровый API отвечает, что человек уволен;
-    из основной таблицы он при этом удаляется и в отчёты больше не попадает.
-    """
-
-    tab_number = models.CharField("Таб№", max_length=20, unique=True)
-    department = models.CharField("Подразделение", max_length=50, db_index=True)
-    production = models.CharField(
-        "Производство", max_length=200, blank=True, db_index=True
-    )
-    service = models.CharField("Служба", max_length=200, blank=True, db_index=True)
-    surname = models.CharField("Фамилия", max_length=100)
-    name = models.CharField("Имя", max_length=100)
-    patronymic = models.CharField("Отчество", max_length=100, blank=True)
-    position = models.CharField("Должность", max_length=255, blank=True)
-    category = models.CharField("Категория", max_length=100, blank=True)
-    birth_date = models.DateField("Дата рождения", null=True, blank=True)
-    region = models.CharField("Регион", max_length=100, blank=True)
-    city = models.CharField("Город", max_length=100, blank=True)
-    street = models.CharField("Улица", max_length=150, blank=True)
-    house = models.CharField("Дом", max_length=20, blank=True)
-    uik = models.CharField("УИК", max_length=10, blank=True, db_index=True)
-    uik_address = models.CharField("Адрес УИК", max_length=255, blank=True)
-    district = models.CharField("Район", max_length=100, blank=True)
-    okrug = models.CharField("Округ", max_length=10, blank=True, db_index=True)
-    method = models.CharField(
-        "Способ голосования", max_length=3, choices=METHODS, blank=True, db_index=True
-    )
-    voted = models.BooleanField("Проголосовал", default=False, db_index=True)
-    voted_method = models.CharField(
-        "Где голосовал", max_length=3, choices=METHODS, blank=True, db_index=True
-    )
-    voted_at = models.DateTimeField("Время отметки", null=True, blank=True)
-    detached = models.BooleanField("Открепился", default=False)
-    not_going = models.BooleanField("Не пойдет", default=False)
-    mark_uvz = models.BooleanField("Регистрация на УИК-УВЗ", default=False)
-    mark_deg = models.BooleanField("Регистрация на ДЭГ", default=False)
-    absence = models.BooleanField("Отсутствие по УП", default=False)
-    proxy_vote = models.BooleanField(
-        "Голосование через ответственного", default=False, db_index=True
-    )
-
-    uik_tik = models.IntegerField("УИК ТИК", null=True, blank=True)
-    id_uik = models.IntegerField("ID УИК", null=True, blank=True)
-
-    class Meta:
-        verbose_name = "Сотрудник(уволен)"
-        verbose_name_plural = "Сотрудники(уволенные)"
-        ordering = ["surname", "name", "patronymic"]
-
-    @property
-    def fio(self) -> str:
-        """ФИО одной строкой (как Employee.fio)."""
-        return " ".join(filter(None, [self.surname, self.name, self.patronymic]))
-
-    @property
-    def method_label(self) -> str:
-        """Название запланированного способа голосования."""
-        return METHOD_LABELS.get(self.method, "")
-
-    @property
-    def voted_method_label(self) -> str:
-        """Название фактического способа голосования."""
-        return METHOD_LABELS.get(self.voted_method, "")
-
-    def __str__(self) -> str:
-        """Подпись в админке: табельный номер и ФИО."""
-        return f"{self.tab_number} {self.fio}"

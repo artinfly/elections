@@ -16,7 +16,6 @@ from ..services.reports.standard import (
     reports_archive,
     responsible_marks_archive,
     summary_table,
-    summary_table_no_u19,
 )
 from ..services.reports.uvz import uvz_statement_not_voted_table
 from ..services.reports.vn import custom_production_summary_vn
@@ -54,7 +53,9 @@ def export_summary(request: HttpRequest) -> HttpResponse:
 @login_required
 def export_summary_no_19(request: HttpRequest) -> HttpResponse:
     """Экспорт сводной таблицы по цехам без учета 19 округа."""
-    return _make_excel_response(summary_table_no_u19(), "svodka_po_ceham_bez_u19")
+    return _make_excel_response(
+        summary_table(exclude_u19=True), "svodka_po_ceham_bez_u19"
+    )
 
 
 @login_required
@@ -138,7 +139,7 @@ def export_archive(request: HttpRequest) -> HttpResponse:
 def export_custom_archive(request: HttpRequest) -> HttpResponse:
     """Экспорт кастомного архива отчетов по цехам."""
     moment = timezone.localtime()
-    archiver = custom_reports_archive(request.GET, moment)
+    archiver = custom_reports_archive(request.GET)
 
     if not archiver.file_count:
         request.session["msg"] = "Нет ни одного цеха - архив пустой"

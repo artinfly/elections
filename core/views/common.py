@@ -73,29 +73,31 @@ def filter_options() -> dict[str, list[str]]:
     Получает уникальные значения для всех выпадающих списков фильтров.
 
     Описание:
-        Выполняет оптимизированные SQL-запросы с DISTINCT для получения
-        уникальных значений. Это предотвращает выгрузку всей таблицы в память Python,
-        что было бы критично для больших баз данных.
+        Для каждого поля база отдаёт только уникальные непустые значения
+        (SELECT DISTINCT), а не всех сотрудников. order_by() без аргументов
+        сбрасывает сортировку модели по ФИО — иначе она попала бы в DISTINCT.
+        Сортировка — в Python, как и раньше: у базы своя сортировка строк.
 
     Возвращает:
-        dict: словари с отсортированными списками уникальных значений.
+        dict: списки уникальных значений по ключам departments, productions,
+            services, okrugs, uiks.
     """
-    employees = Employee.objects.values(
-        "department", "production", "service", "okrug", "uik"
-    )
 
-    departments = sorted({e["department"] for e in employees if e["department"]})
-    productions = sorted({e["production"] for e in employees if e["production"]})
-    services = sorted({e["service"] for e in employees if e["service"]})
-    okrugs = sorted({e["okrug"] for e in employees if e["okrug"]})
-    uiks = sorted({e["uik"] for e in employees if e["uik"]})
+    def distinct(field: str) -> list[str]:
+        values = (
+            Employee.objects.exclude(**{field: ""})
+            .values_list(field, flat=True)
+            .order_by()
+            .distinct()
+        )
+        return sorted(values)
 
     return {
-        "departments": departments,
-        "productions": productions,
-        "services": services,
-        "okrugs": okrugs,
-        "uiks": uiks,
+        "departments": distinct("department"),
+        "productions": distinct("production"),
+        "services": distinct("service"),
+        "okrugs": distinct("okrug"),
+        "uiks": distinct("uik"),
     }
 
 

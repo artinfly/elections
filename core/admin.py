@@ -20,7 +20,7 @@ from django.http import JsonResponse
 from django.urls import path
 from django.utils import timezone
 
-from .models import Employee, EmployeeArchive, Profile
+from .models import Employee, EmployeeArchive, EmployeeBase, Profile
 
 # Сначала снимаем стандартную регистрацию модели User,
 # чтобы переопределить её нашим кастомным классом.
@@ -335,6 +335,20 @@ class CustomUserAdmin(UserAdmin):
 # ==============================================================================
 
 
+def archive_fields(employee: Employee) -> dict:
+    """
+    Значения всех общих полей сотрудника (EmployeeBase) для записи в архив.
+
+    Поля берутся из модели, а не перечисляются вручную: новое поле сотрудника
+    автоматически попадёт и в архив.
+    """
+    return {
+        field.name: getattr(employee, field.name)
+        for field in EmployeeBase._meta.get_fields()
+        if field.concrete and not field.primary_key
+    }
+
+
 @admin.register(Employee)
 class EmployeeAdmin(admin.ModelAdmin):
     """
@@ -433,38 +447,7 @@ class EmployeeAdmin(admin.ModelAdmin):
 
             try:
                 with transaction.atomic():
-                    EmployeeArchive.objects.create(
-                        tab_number=employee.tab_number,
-                        department=employee.department,
-                        production=employee.production,
-                        service=employee.service,
-                        surname=employee.surname,
-                        name=employee.name,
-                        patronymic=employee.patronymic,
-                        position=employee.position,
-                        category=employee.category,
-                        birth_date=employee.birth_date,
-                        region=employee.region,
-                        city=employee.city,
-                        street=employee.street,
-                        house=employee.house,
-                        uik=employee.uik,
-                        uik_address=employee.uik_address,
-                        district=employee.district,
-                        okrug=employee.okrug,
-                        method=employee.method,
-                        voted=employee.voted,
-                        voted_method=employee.voted_method,
-                        voted_at=employee.voted_at,
-                        detached=employee.detached,
-                        not_going=employee.not_going,
-                        mark_uvz=employee.mark_uvz,
-                        mark_deg=employee.mark_deg,
-                        absence=employee.absence,
-                        proxy_vote=employee.proxy_vote,
-                        uik_tik=employee.uik_tik,
-                        id_uik=employee.id_uik,
-                    )
+                    EmployeeArchive.objects.create(**archive_fields(employee))
                     employee.delete()
                 archived_count += 1
             except Exception as e:
