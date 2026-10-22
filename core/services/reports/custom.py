@@ -107,6 +107,115 @@ GROUP_PLAN_PREDICATE: dict[str, Callable[[Employee], bool]] = {
 }
 
 
+# ==============================================================================
+# Колонки "19 округ" (только для отчёта по производствам)
+# ==============================================================================
+
+# Города, жители которых без указанного округа не относятся к 19 округу.
+OKRUG19_EXCLUDED_CITIES = ("Нижний Тагил", "Покровское-1")
+
+# Заголовки колонок, добавляемых ПОСЛЕ последней колонки "Всего" (процент).
+OKRUG19_TAIL_HEADERS = ("Голоса Всего 19 округ", "Процент 19 Округ")
+
+
+def _okrug19_base(p: Employee) -> bool:
+    """
+    Базовое условие «не 19 округ» (без проверки способа):
+
+        (округ пустой и город не из OKRUG19_EXCLUDED_CITIES)
+        или округ 20, или округ 21
+    """
+    okrug = (p.okrug or "").strip()
+    return (okrug == "" and p.city not in OKRUG19_EXCLUDED_CITIES) or okrug in (
+        "20",
+        "21",
+    )
+
+
+def _okrug19_cond_total(p: Employee) -> bool:
+    """Полное условие «не 19 округ»: базовое условие и план не «УИК-19»."""
+    return _okrug19_base(p) and p.method != UIK19
+
+
+def _okrug19_cond_votes(p: Employee) -> bool:
+    """То же условие, но вместо method используется voted_method."""
+    return _okrug19_base(p) and p.voted_method != UIK19
+
+
+def _okrug19_total(p: Employee) -> bool:
+    """
+    Колонка "Всего 19 округ" = "Всего людей" минус количество людей в выборке
+    по условию «не 19 округ» (сотрудник считается, если условие
+    для него НЕ выполняется).
+    """
+    return not _okrug19_cond_total(p)
+
+
+def _okrug19_votes(p: Employee) -> bool:
+    """
+    Колонка "Голоса Всего 19 округ" = проголосовавшие (voted) минус
+    проголосовавшие, попавшие в выборку по тому же условию, но с voted_method
+    вместо method (сотрудник считается, если он проголосовал и условие
+    для него НЕ выполняется).
+
+    Голос засчитывается только тем, кто входит и в "Всего 19 округ"
+    (условие с method тоже НЕ выполняется). Иначе человек, у которого
+    method != 'u19', а voted_method == 'u19', попадал бы в голоса, но не
+    в "Всего 19 округ", и "Процент 19 Округ" мог превысить 100%.
+    """
+    return bool(p.voted) and _okrug19_total(p) and not _okrug19_cond_votes(p)
+
+
+def _okrug19_percent(votes: int, total: int) -> str:
+    """Колонка "Процент 19 Округ": голоса 19 округ / всего 19 округ."""
+    return f"{round(votes / total * 100)}%" if total else ""
+
+
+def _draw_okrug19_tail_headers(sheet: Any, header_row: int, column: int) -> None:
+    """Рисует заголовки двух завершающих колонок 19 округа (на две строки шапки)."""
+    bold = Font(bold=True)
+    centered = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for title_text in OKRUG19_TAIL_HEADERS:
+        sheet.merge_cells(
+            start_row=header_row,
+            start_column=column,
+            end_row=header_row + 1,
+            end_column=column,
+        )
+        cell = sheet.cell(header_row, column, title_text)
+        cell.font = bold
+        cell.alignment = centered
+        column += 1
+
+
+def _write_okrug19_tail(
+    sheet: Any,
+    row: int,
+    column: int,
+    total: int,
+    votes: int,
+    is_total_row: bool = False,
+) -> None:
+    """
+    Пишет "Голоса Всего 19 округ" и "Процент 19 Округ" в строку отчёта.
+
+    В обычных строках нулевые голоса не выводятся (как и остальные колонки);
+    в итоговых строках выводятся всегда, жирным шрифтом.
+    """
+    center = Alignment(horizontal="center")
+    if votes > 0 or is_total_row:
+        cell = sheet.cell(row, column, votes)
+        cell.alignment = center
+        if is_total_row:
+            cell.font = Font(bold=True)
+    percent = _okrug19_percent(votes, total)
+    if percent:
+        cell = sheet.cell(row, column + 1, percent)
+        cell.alignment = center
+        if is_total_row:
+            cell.font = Font(bold=True)
+
+
 def _percent_denominator_groups(
     short: bool = False, with_total: bool = True
 ) -> list[Optional[str]]:
@@ -520,6 +629,13 @@ def custom_production_summary(
             строке процент — но от общего числа людей в цехе/производстве
             этой строки (не от "Планирует").
 
+        Дополнительно выводятся колонки 19 округа:
+        "Всего 19 округ" (после "Всего") = "Всего людей" минус количество
+        людей в выборке по условию «не 19 округ»; после последней колонки
+        "Всего" (процент) — "Голоса Всего 19 округ" = проголосовавшие минус
+        проголосовавшие в выборке по тому же условию с voted_method вместо
+        method, и "Процент 19 Округ" (голоса 19 округа / всего 19 округа).
+
     Возвращает:
         Workbook: книга openpyxl со сводным отчётом.
     """
@@ -554,9 +670,14 @@ def custom_production_summary(
 
     # Заголовки ведущих колонок.
     lead_headers = (
-        ("Производство", "Цех", "Всего") if include_depts else ("Производство", "Всего")
+        ("Производство", "Цех", "Всего", "Всего 19 округ")
+        if include_depts
+        else ("Производство", "Всего", "Всего 19 округ")
     )
-    total_columns = len(lead_headers) + len(predicates)
+    total_columns = len(lead_headers) + len(predicates) + len(OKRUG19_TAIL_HEADERS)
+    # Номер первой колонки с предикатами и первой колонки "хвоста" 19 округа.
+    pred_start = len(lead_headers) + 1
+    tail_start = pred_start + len(predicates)
 
     # Главный заголовок отчёта.
     title = sheet.cell(
@@ -582,12 +703,13 @@ def custom_production_summary(
         column += 1
 
     _draw_custom_groups(sheet, start_row=header_row, start_col=column, short=short)
+    _draw_okrug19_tail_headers(sheet, header_row, tail_start)
 
     # Настройка ширины колонок.
     widths = (
-        (16, 14, 10) + (12,) * len(predicates)
+        (16, 14, 10, 12) + (12,) * len(predicates) + (14, 12)
         if include_depts
-        else (24, 10) + (12,) * len(predicates)
+        else (24, 10, 12) + (12,) * len(predicates) + (14, 12)
     )
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
@@ -613,6 +735,8 @@ def custom_production_summary(
     row = header_row + 2
     grand_total_people = 0
     grand_totals = [0] * len(predicates)
+    grand_total19 = 0
+    grand_votes19 = 0
     # Счётчики "Планирует" по каждой группе способов голосования (для всего
     # общества) — знаменатель процента для колонок "Проголосовал (QR-код)".
     grand_plan_counts: dict[str, int] = defaultdict(int)
@@ -635,6 +759,8 @@ def custom_production_summary(
             # Счётчики "Планирует" по каждой группе — знаменатель процента
             # для колонок "Проголосовал (QR-код)" в рамках производства.
             prod_plan_counts: dict[str, int] = defaultdict(int)
+            prod_total19 = 0
+            prod_votes19 = 0
 
             # Сортировка цехов внутри производства.
             for department in sorted(data[production].keys(), key=_by_number):
@@ -646,6 +772,16 @@ def custom_production_summary(
                 sheet.cell(row, 1, production)
                 sheet.cell(row, 2, padded_number(department))
                 sheet.cell(row, 3, count).alignment = Alignment(horizontal="center")
+
+                dept_total19 = sum(1 for p in persons if _okrug19_total(p))
+                dept_votes19 = sum(1 for p in persons if _okrug19_votes(p))
+                prod_total19 += dept_total19
+                prod_votes19 += dept_votes19
+                grand_total19 += dept_total19
+                grand_votes19 += dept_votes19
+                sheet.cell(row, 4, dept_total19).alignment = Alignment(
+                    horizontal="center"
+                )
 
                 # Локальные счётчики "Планирует" по этому цеху — нужны, чтобы
                 # в полном режиме (short=False) показать в самой строке цеха
@@ -670,25 +806,33 @@ def custom_production_summary(
                             cell_value = _format_with_percent(val, count)
                         else:
                             cell_value = val
-                        sheet.cell(row, 4 + offset, cell_value).alignment = Alignment(
-                            horizontal="center"
+                        sheet.cell(row, pred_start + offset, cell_value).alignment = (
+                            Alignment(horizontal="center")
                         )
                     prod_totals[offset] += val
                     grand_totals[offset] += val
+                _write_okrug19_tail(sheet, row, tail_start, dept_total19, dept_votes19)
                 row += 1
 
             # Строка Итого по производству.
             sheet.cell(row, 2, "Итого").font = bold
             sheet.cell(row, 3, prod_total_people).font = bold
             sheet.cell(row, 3).alignment = Alignment(horizontal="center")
+            sheet.cell(row, 4, prod_total19).font = bold
+            sheet.cell(row, 4).alignment = Alignment(horizontal="center")
             for offset, val in enumerate(prod_totals):
                 denom_group = percent_denominator_groups[offset]
                 denom = (
                     prod_plan_counts[denom_group] if denom_group else prod_total_people
                 )
-                cell = sheet.cell(row, 4 + offset, _format_with_percent(val, denom))
+                cell = sheet.cell(
+                    row, pred_start + offset, _format_with_percent(val, denom)
+                )
                 cell.font = bold
                 cell.alignment = centered
+            _write_okrug19_tail(
+                sheet, row, tail_start, prod_total19, prod_votes19, is_total_row=True
+            )
             row += 1
         else:
             # Режим без разбивки по цехам.
@@ -698,6 +842,12 @@ def custom_production_summary(
 
             sheet.cell(row, 1, production)
             sheet.cell(row, 2, count).alignment = Alignment(horizontal="center")
+
+            local_total19 = sum(1 for p in persons if _okrug19_total(p))
+            local_votes19 = sum(1 for p in persons if _okrug19_votes(p))
+            grand_total19 += local_total19
+            grand_votes19 += local_votes19
+            sheet.cell(row, 3, local_total19).alignment = Alignment(horizontal="center")
 
             # Локальные счётчики "Планирует" по этому производству — та же
             # логика, что и для цеха выше.
@@ -719,10 +869,11 @@ def custom_production_summary(
                         cell_value = _format_with_percent(val, count)
                     else:
                         cell_value = val
-                    sheet.cell(row, 3 + offset, cell_value).alignment = Alignment(
-                        horizontal="center"
+                    sheet.cell(row, pred_start + offset, cell_value).alignment = (
+                        Alignment(horizontal="center")
                     )
                 grand_totals[offset] += val
+            _write_okrug19_tail(sheet, row, tail_start, local_total19, local_votes19)
             row += 1
 
     # Строка Всего по Обществу.
@@ -730,26 +881,40 @@ def custom_production_summary(
         sheet.cell(row, 2, "Всего по Обществу").font = bold
         sheet.cell(row, 3, grand_total_people).font = bold
         sheet.cell(row, 3).alignment = Alignment(horizontal="center")
+        sheet.cell(row, 4, grand_total19).font = bold
+        sheet.cell(row, 4).alignment = Alignment(horizontal="center")
         for offset, val in enumerate(grand_totals):
             denom_group = percent_denominator_groups[offset]
             denom = (
                 grand_plan_counts[denom_group] if denom_group else grand_total_people
             )
-            cell = sheet.cell(row, 4 + offset, _format_with_percent(val, denom))
+            cell = sheet.cell(
+                row, pred_start + offset, _format_with_percent(val, denom)
+            )
             cell.font = bold
             cell.alignment = centered
+        _write_okrug19_tail(
+            sheet, row, tail_start, grand_total19, grand_votes19, is_total_row=True
+        )
     else:
         sheet.cell(row, 1, "Всего по Обществу").font = bold
         sheet.cell(row, 2, grand_total_people).font = bold
         sheet.cell(row, 2).alignment = Alignment(horizontal="center")
+        sheet.cell(row, 3, grand_total19).font = bold
+        sheet.cell(row, 3).alignment = Alignment(horizontal="center")
         for offset, val in enumerate(grand_totals):
             denom_group = percent_denominator_groups[offset]
             denom = (
                 grand_plan_counts[denom_group] if denom_group else grand_total_people
             )
-            cell = sheet.cell(row, 3 + offset, _format_with_percent(val, denom))
+            cell = sheet.cell(
+                row, pred_start + offset, _format_with_percent(val, denom)
+            )
             cell.font = bold
             cell.alignment = centered
+        _write_okrug19_tail(
+            sheet, row, tail_start, grand_total19, grand_votes19, is_total_row=True
+        )
 
     _apply_border(sheet)
     return book
