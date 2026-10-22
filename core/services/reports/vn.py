@@ -13,10 +13,12 @@
       - проценты НЕ пишутся в ячейки "Всего" и "Итого", а вынесены
         в отдельный крайний столбец "Процент" (правое "Всего" / левое "Всего"),
         с точностью до двух знаков после запятой;
-      - в отчёте БЕЗ цехов добавлен пустой столбец плана: заголовок
-        генерируется по текущей дате на ПК (см. _vn_plan_column_title),
-        ячейки пустые — их заполняют от руки на бумаге или одноразовой
-        загрузкой данных. В отчёте С цехами колонки плана нет;
+      - колонки плана нет ни в одном из двух отчётов;
+      - добавлены колонки 19 округа: "Всего 19 округ" (после левого "Всего")
+        = "Всего людей" минус количество в выборке по условию «не 19 округ»;
+        после колонки "Процент" — "Голоса Всего 19 округ" = проголосовавшие
+        минус проголосовавшие в выборке по тому же условию с voted_method вместо
+        method, и "Процент 19 Округ";
       - сотрудники с отметкой "Уважительная причина" (absence) не участвуют
         в отчёте: они не попадают в левое "Всего" и не влияют на процент.
 """
@@ -33,7 +35,7 @@ from openpyxl.workbook import Workbook
 
 from ...models import DEG, UIK, UIK19, UVZ, Employee
 from ..excel import NO_PRODUCTION, _apply_border, _by_number, padded_number
-from .custom import _custom_qs
+from .custom import _custom_qs, _okrug19_total, _okrug19_votes
 
 # ==============================================================================
 # Конфигурация отчёта ВН
@@ -52,16 +54,8 @@ VN_GROUPS: list[tuple[str, Callable[[Employee], bool]]] = [
 ]
 
 
-def _vn_plan_column_title(moment: datetime) -> str:
-    """
-    Заголовок пустой колонки плана по текущей дате на ПК.
-
-    Описание:
-        Берётся дата момента формирования отчёта (timezone.localtime()),
-        без каких-либо смещений: сформировали 19.09 — заголовок
-        "План на 19.09.2026".
-    """
-    return f"План на {moment.date():%d.%m.%Y}"
+# Заголовки завершающих колонок отчёта (после групп способов).
+VN_TAIL_TITLES = ("Всего", "Процент", "Голоса Всего 19 округ", "Процент 19 Округ")
 
 
 def _vn_percent(voted: int, total: int) -> str:
@@ -86,35 +80,59 @@ def _vn_percent(voted: int, total: int) -> str:
     return f"{voted / total * 100:.2f}".replace(".", ",") + "%"
 
 
-def _vn_row_stats(persons: list) -> tuple[list[int], int, int]:
+def _vn_row_stats(persons: list) -> tuple[list[int], int, int, int, int]:
     """
     Считает показатели одной строки отчёта (цеха, производства или итога).
 
     Возвращает:
         tuple: (список значений по группам VN_GROUPS,
                 всего людей,
-                всего проголосовало).
+                всего проголосовало,
+                всего 19 округ,
+                голоса всего 19 округ).
     """
     values = [sum(1 for p in persons if predicate(p)) for _, predicate in VN_GROUPS]
     voted = sum(1 for p in persons if p.voted)
-    return values, len(persons), voted
+    total19 = sum(1 for p in persons if _okrug19_total(p))
+    votes19 = sum(1 for p in persons if _okrug19_votes(p))
+    return values, len(persons), voted, total19, votes19
 
 
-def _draw_vn_header(
+def _write_vn_okrug19(
     sheet,
-    lead_headers: tuple[str, ...],
-    moment: datetime,
-    include_plan: bool,
+    row: int,
+    total19_col: int,
+    votes19_col: int,
+    percent19_col: int,
+    total19: int,
+    votes19: int,
+    is_total_row: bool = False,
 ) -> None:
+    """
+    Пишет в строку три колонки 19 округа: "Всего 19 округ", "Голоса Всего
+    19 округ" и "Процент 19 Округ" (голоса / всего, формат как у "Процент").
+    """
+    values = (
+        (total19_col, total19),
+        (votes19_col, votes19),
+        (percent19_col, _vn_percent(votes19, total19)),
+    )
+    for col, value in values:
+        cell = sheet.cell(row, col, value)
+        cell.alignment = Alignment(horizontal="center")
+        if is_total_row:
+            cell.font = Font(bold=True)
+
+
+def _draw_vn_header(sheet, lead_headers: tuple[str, ...]) -> None:
     """
     Отрисовывает двухстрочную шапку отчёта ВН (строки 2 и 3).
 
     Описание:
-        Ведущие колонки и хвостовые ("Всего", план, "Процент") объединяются
+        Ведущие колонки и хвостовые (VN_TAIL_TITLES) объединяются
         по вертикали на две строки. Группы способов рисуются так:
         заголовок группы в строке 2, подколонка "Проголосовал (QR-код)"
-        в строке 3. Колонка плана добавляется только при include_plan=True
-        (отчёт без цехов), её заголовок — по текущей дате на ПК.
+        в строке 3.
     """
     bold = Font(bold=True)
     centered = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -138,12 +156,7 @@ def _draw_vn_header(
         sub.alignment = centered
         column += 1
 
-    tail_titles = (
-        ("Всего", _vn_plan_column_title(moment), "Процент")
-        if include_plan
-        else ("Всего", "Процент")
-    )
-    for title_text in tail_titles:
+    for title_text in VN_TAIL_TITLES:
         sheet.merge_cells(
             start_row=2, start_column=column, end_row=3, end_column=column
         )
@@ -173,8 +186,10 @@ def custom_production_summary_vn(
         в левое "Всего" и не учитываются в процентах.
 
         Структура колонок:
-          с цехами:  Производство | Цех | Всего | 4 группы (QR) | Всего | Процент
-          без цехов: Производство | Всего | 4 группы (QR) | Всего | План | Процент
+          с цехами:  Производство | Цех | Всего | Всего 19 округ | 4 группы (QR)
+                     | Всего | Процент | Голоса Всего 19 округ | Процент 19 Округ
+          без цехов: Производство | Всего | Всего 19 округ | 4 группы (QR)
+                     | Всего | Процент | Голоса Всего 19 округ | Процент 19 Округ
 
         В детальных строках нули в группах не печатаются (пустая ячейка),
         в строках "Итого" и "Всего по Обществу" печатаются все числа,
@@ -184,9 +199,9 @@ def custom_production_summary_vn(
     Аргументы:
         params: параметры фильтров конструктора.
         include_depts: если True, выводит строки по цехам внутри производств
-            и строки "Итого" по каждому производству; колонки плана нет.
-            Если False — одна строка на производство плюс пустая колонка плана.
-        moment: момент времени для заголовка отчёта и даты плана
+            и строки "Итого" по каждому производству.
+            Если False — одна строка на производство.
+        moment: момент времени для заголовка отчёта
             (по умолчанию — текущее время на ПК).
 
     Возвращает:
@@ -208,11 +223,11 @@ def custom_production_summary_vn(
     centered = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
     lead_headers = (
-        ("Производство", "Цех", "Всего") if include_depts else ("Производство", "Всего")
+        ("Производство", "Цех", "Всего", "Всего 19 округ")
+        if include_depts
+        else ("Производство", "Всего", "Всего 19 округ")
     )
-    # Колонка плана нужна только в отчёте без цехов.
-    include_plan = not include_depts
-    total_columns = len(lead_headers) + len(VN_GROUPS) + (3 if include_plan else 2)
+    total_columns = len(lead_headers) + len(VN_GROUPS) + len(VN_TAIL_TITLES)
 
     # Главный заголовок отчёта (строка 1).
     title = sheet.cell(
@@ -222,25 +237,29 @@ def custom_production_summary_vn(
     title.alignment = centered
     sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_columns)
 
-    # Шапка колонок (строки 2-3), дата плана — текущая на ПК.
-    _draw_vn_header(sheet, lead_headers, moment, include_plan)
+    # Шапка колонок (строки 2-3).
+    _draw_vn_header(sheet, lead_headers)
 
     # Ширины колонок.
     widths = (
-        ((16, 14, 10) if include_depts else (24, 10))
+        ((16, 14, 10, 12) if include_depts else (24, 10, 12))
         + (14,) * len(VN_GROUPS)
-        + ((10, 16, 12) if include_plan else (10, 12))
+        + (10, 12, 14, 12)
     )
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
 
     sheet.freeze_panes = "A4"
 
-    # Индексы колонок: группы, правое "Всего", процент (план данных не имеет).
+    # Индексы колонок: "Всего 19 округ" (последняя ведущая), группы,
+    # правое "Всего", процент, голоса 19 округа, процент 19 округа.
     lead_count = len(lead_headers)
+    total19_col = lead_count
     first_group_col = lead_count + 1
     total_voted_col = lead_count + len(VN_GROUPS) + 1
-    percent_col = total_voted_col + (2 if include_plan else 1)
+    percent_col = total_voted_col + 1
+    votes19_col = percent_col + 1
+    percent19_col = votes19_col + 1
 
     # Группировка данных в памяти (как в текущих отчётах — по полю service).
     if include_depts:
@@ -259,6 +278,8 @@ def custom_production_summary_vn(
     grand_total_people = 0
     grand_totals = [0] * len(VN_GROUPS)
     grand_voted = 0
+    grand_total19 = 0
+    grand_votes19 = 0
 
     # Сортировка производств: обычные по алфавиту, "Без производства" в конце.
     for production in sorted(
@@ -276,15 +297,21 @@ def custom_production_summary_vn(
             prod_total_people = 0
             prod_totals = [0] * len(VN_GROUPS)
             prod_voted = 0
+            prod_total19 = 0
+            prod_votes19 = 0
 
             # Сортировка цехов внутри производства.
             for department in sorted(data[production].keys(), key=_by_number):
                 persons = data[production][department]
-                values, count, voted = _vn_row_stats(persons)
+                values, count, voted, total19, votes19 = _vn_row_stats(persons)
                 prod_total_people += count
                 prod_voted += voted
                 grand_total_people += count
                 grand_voted += voted
+                prod_total19 += total19
+                prod_votes19 += votes19
+                grand_total19 += total19
+                grand_votes19 += votes19
 
                 sheet.cell(row, 1, production)
                 sheet.cell(row, 2, padded_number(department))
@@ -301,6 +328,15 @@ def custom_production_summary_vn(
                 )
                 sheet.cell(row, percent_col, _vn_percent(voted, count)).alignment = (
                     Alignment(horizontal="center")
+                )
+                _write_vn_okrug19(
+                    sheet,
+                    row,
+                    total19_col,
+                    votes19_col,
+                    percent19_col,
+                    total19,
+                    votes19,
                 )
                 row += 1
 
@@ -320,13 +356,25 @@ def custom_production_summary_vn(
             )
             cell.font = bold
             cell.alignment = centered
+            _write_vn_okrug19(
+                sheet,
+                row,
+                total19_col,
+                votes19_col,
+                percent19_col,
+                prod_total19,
+                prod_votes19,
+                is_total_row=True,
+            )
             row += 1
         else:
             # Режим без разбивки по цехам: строка на производство.
             persons = data[production]
-            values, count, voted = _vn_row_stats(persons)
+            values, count, voted, total19, votes19 = _vn_row_stats(persons)
             grand_total_people += count
             grand_voted += voted
+            grand_total19 += total19
+            grand_votes19 += votes19
 
             sheet.cell(row, 1, production)
             sheet.cell(row, 2, count).alignment = Alignment(horizontal="center")
@@ -341,6 +389,9 @@ def custom_production_summary_vn(
             )
             sheet.cell(row, percent_col, _vn_percent(voted, count)).alignment = (
                 Alignment(horizontal="center")
+            )
+            _write_vn_okrug19(
+                sheet, row, total19_col, votes19_col, percent19_col, total19, votes19
             )
             row += 1
 
@@ -361,6 +412,16 @@ def custom_production_summary_vn(
         )
         cell.font = bold
         cell.alignment = centered
+        _write_vn_okrug19(
+            sheet,
+            row,
+            total19_col,
+            votes19_col,
+            percent19_col,
+            grand_total19,
+            grand_votes19,
+            is_total_row=True,
+        )
     else:
         sheet.cell(row, 1, "Всего по Обществу").font = bold
         sheet.cell(row, 2, grand_total_people).font = bold
@@ -377,6 +438,16 @@ def custom_production_summary_vn(
         )
         cell.font = bold
         cell.alignment = centered
+        _write_vn_okrug19(
+            sheet,
+            row,
+            total19_col,
+            votes19_col,
+            percent19_col,
+            grand_total19,
+            grand_votes19,
+            is_total_row=True,
+        )
 
     _apply_border(sheet)
     return book
