@@ -9,6 +9,7 @@
 """
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Optional
 
@@ -21,11 +22,23 @@ from openpyxl.workbook import Workbook
 
 from ...models import DEG, UIK, UIK19, UVZ, Employee
 from ..excel import (
-    NO_PRODUCTION,
     _apply_border,
     _by_number,
     _format_with_percent,
     padded_number,
+)
+from .production import (
+    BOLD,
+    CENTER,
+    CENTERED,
+    FIRST_DATA_ROW,
+    HEADER_ROW,
+    draw_lead_headers,
+    group_people,
+    lead_headers,
+    production_order,
+    write_production_heading,
+    write_title,
 )
 
 # ==============================================================================
@@ -491,22 +504,101 @@ def _draw_custom_groups(
 # ==============================================================================
 
 
+# Ведущие колонки отчёта «по людям».
+PEOPLE_LEAD_HEADERS = ("Номер УИК", "Цех", "Таб.№", "ФИО", "Округ")
+
+
+def _people_table(
+    sheet: Any, people: QuerySet, short: bool, with_total: bool
+) -> tuple[int, list[int], dict[str, int], list[Optional[str]]]:
+    """
+    Шапка и строки отчёта «по людям»: сотрудник — строка, «+» в колонках,
+    где выполняется условие колонки.
+
+    Возвращает:
+        tuple: (номер строки для итога, количество «+» по колонкам,
+                число «Планирует» по группам, знаменатели процентов
+                — см. _percent_denominator_groups).
+    """
+    for column, title in enumerate(PEOPLE_LEAD_HEADERS, 1):
+        sheet.merge_cells(
+            start_row=1, start_column=column, end_row=2, end_column=column
+        )
+        cell = sheet.cell(1, column, title)
+        cell.font = BOLD
+        cell.alignment = CENTERED
+    first_mark_col = len(PEOPLE_LEAD_HEADERS) + 1
+    predicates = _draw_custom_groups(
+        sheet, start_row=1, start_col=first_mark_col, short=short, with_total=with_total
+    )
+
+    widths = (10, 8, 10, 42, 8) + (12,) * len(predicates)
+    for index, width in enumerate(widths, 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    sheet.freeze_panes = "A3"
+
+    row = 3
+    totals = [0] * len(predicates)
+    plan_counts: dict[str, int] = defaultdict(int)
+    # iterator() с пачками по 2000 строк не держит всю выборку в памяти.
+    for person in people.iterator(chunk_size=2000):
+        for column, value in enumerate(
+            (
+                person.uik,
+                person.department,
+                person.tab_number,
+                person.fio,
+                person.okrug,
+            ),
+            1,
+        ):
+            sheet.cell(row, column, value)
+        for offset, predicate in enumerate(predicates):
+            if predicate(person):
+                sheet.cell(row, first_mark_col + offset, "+")
+                totals[offset] += 1
+        for group, plan_predicate in GROUP_PLAN_PREDICATE.items():
+            if plan_predicate(person):
+                plan_counts[group] += 1
+        row += 1
+
+    return row, totals, plan_counts, _percent_denominator_groups(short, with_total)
+
+
+def _people_totals(
+    sheet: Any,
+    row: int,
+    people_count: int,
+    totals: list[int],
+    plan_counts: dict[str, int],
+    denominators: list[Optional[str]],
+) -> None:
+    """Итоги по колонкам с «+»: число и процент (жирным, по центру)."""
+    first_mark_col = len(PEOPLE_LEAD_HEADERS) + 1
+    for offset, total in enumerate(totals):
+        denom_group = denominators[offset]
+        denom = plan_counts[denom_group] if denom_group else people_count
+        cell = sheet.cell(
+            row, first_mark_col + offset, _format_with_percent(total, denom)
+        )
+        cell.font = BOLD
+        cell.alignment = CENTERED
+
+
 def custom_report(params: dict, short: bool = False) -> Workbook:
     """
-    Генерирует сводный Excel-отчёт "По людям" на основе фильтров.
+    Сводный Excel-отчёт «По людям» по фильтрам конструктора.
 
     Описание:
-        Выводит каждого сотрудника отдельной строкой. В колонках проставляются
-        отметки "+" в соответствии с предикатами из CUSTOM_COLUMNS.
-        В конце добавляется строка ИТОГО с количеством и процентами.
+        Каждый сотрудник — отдельная строка, в колонках «+» по CUSTOM_COLUMNS.
+        Внизу строка ИТОГО с количеством и процентами.
 
     Аргументы:
         params: параметры фильтров конструктора.
-        short: если True, для каждого способа голосования оставляются только
-            две подколонки (см. _get_custom_columns), а колонки
-            "Не определился" и "Уважительная причина" убираются без замены —
-            колонка "Всего" в этом отчёте не нужна, так как у него нет
-            общей итоговой строки с процентами по каждому сотруднику.
+        short: если True, для каждого способа голосования остаются только
+            две подколонки (см. _get_custom_columns), а «Не определился»
+            и «Уважительная причина» убираются. Колонка «Всего» в этом
+            отчёте не нужна.
 
     Возвращает:
         Workbook: книга openpyxl с готовым отчётом.
@@ -514,84 +606,164 @@ def custom_report(params: dict, short: bool = False) -> Workbook:
     people = _custom_qs(params).order_by(
         "department", "surname", "name", "patronymic", "uik"
     )
-
     book = openpyxl.Workbook()
     sheet = book.active
     sheet.title = "Сводный отчёт"
-    bold = Font(bold=True)
-    centered = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    # Ведущие колонки (основная информация о сотруднике).
-    column = 1
-    for title in ("Номер УИК", "Цех", "Таб.№", "ФИО", "Округ"):
-        sheet.merge_cells(
-            start_row=1, start_column=column, end_row=2, end_column=column
-        )
-        cell = sheet.cell(1, column, title)
-        cell.font = bold
-        cell.alignment = centered
-        column += 1
-
-    # Отрисовка динамических колонок и получение списка предикатов.
-    # Колонка "Всего" в этом отчёте не нужна (with_total=False).
-    predicates = _draw_custom_groups(
-        sheet, start_row=1, start_col=column, short=short, with_total=False
+    row, totals, plans, denominators = _people_table(
+        sheet, people, short, with_total=False
     )
-
-    # Настройка ширины колонок.
-    widths = (10, 8, 10, 42, 8) + (12,) * len(predicates)
-    for index, width in enumerate(widths, 1):
-        sheet.column_dimensions[get_column_letter(index)].width = width
-
-    # Фиксация заголовков при прокрутке.
-    sheet.freeze_panes = "A3"
-
-    # Список, параллельный predicates: для каких колонок процент в строке
-    # ИТОГО нужно считать не от total_people, а от количества "Планирует"
-    # соответствующей группы (см. GROUP_PLAN_PREDICATE).
-    percent_denominator_groups = _percent_denominator_groups(short, with_total=False)
-
-    row = 3
-    totals = [0] * len(predicates)
-    total_people = 0
-    # Счётчики "Планирует" по каждой группе способов голосования —
-    # нужны как знаменатель процента для колонок "Проголосовал (QR-код)".
-    plan_counts: dict[str, int] = defaultdict(int)
-
-    # Итератор с пачками по 2000 строк защищает от переполнения памяти.
-    for person in people.iterator(chunk_size=2000):
-        total_people += 1
-        sheet.cell(row, 1, person.uik)
-        sheet.cell(row, 2, person.department)
-        sheet.cell(row, 3, person.tab_number)
-        sheet.cell(row, 4, person.fio)
-        sheet.cell(row, 5, person.okrug)
-
-        # Простановка отметок в колонках.
-        for offset, predicate in enumerate(predicates):
-            if predicate(person):
-                sheet.cell(row, 6 + offset, "+")
-                totals[offset] += 1
-
-        for group, plan_predicate in GROUP_PLAN_PREDICATE.items():
-            if plan_predicate(person):
-                plan_counts[group] += 1
-        row += 1
-
-    # Строка ИТОГО.
-    sheet.cell(row, 1, "ИТОГО").font = bold
-    sheet.cell(row, 2, total_people).font = bold
-    sheet.cell(row, 2).alignment = centered
-
-    for offset, total in enumerate(totals):
-        denom_group = percent_denominator_groups[offset]
-        denom = plan_counts[denom_group] if denom_group else total_people
-        cell = sheet.cell(row, 6 + offset, _format_with_percent(total, denom))
-        cell.font = bold
-        cell.alignment = centered
+    people_count = row - 3
+    sheet.cell(row, 1, "ИТОГО").font = BOLD
+    cell = sheet.cell(row, 2, people_count)
+    cell.font = BOLD
+    cell.alignment = CENTERED
+    _people_totals(sheet, row, people_count, totals, plans, denominators)
 
     _apply_border(sheet)
     return book
+
+
+def department_custom_report(department: str, params: dict) -> Workbook:
+    """
+    Отчёт «по людям» по одному цеху для архива конструктора (полный набор колонок).
+
+    Аргументы:
+        department: номер цеха.
+        params: фильтры конструктора (производство, способ, округ и т.д.).
+
+    Возвращает:
+        Workbook: книга openpyxl с отчётом по цеху.
+    """
+    people = (
+        _custom_qs(params)
+        .filter(department=department)
+        .order_by("surname", "name", "patronymic", "uik")
+    )
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = f"Цех {department}"[:31]
+
+    row, totals, plans, denominators = _people_table(
+        sheet, people, False, with_total=True
+    )
+    people_count = row - 3
+    # Подпись ИТОГО — под колонкой «ФИО», а не под «Номер УИК»/«Цех».
+    cell = sheet.cell(row, 4, f"ИТОГО: {people_count} чел.")
+    cell.font = BOLD
+    cell.alignment = CENTERED
+    _people_totals(sheet, row, people_count, totals, plans, denominators)
+
+    _apply_border(sheet)
+    return book
+
+
+@dataclass
+class _GroupStats:
+    """
+    Показатели группы людей: цеха, производства или всего общества.
+
+    values — число людей по каждой колонке-предикату, plans — число
+    «Планирует» по группам способов (знаменатель процентов «Проголосовал»),
+    total19 и votes19 — колонки 19 округа.
+    """
+
+    people: int
+    values: list[int]
+    plans: dict[str, int]
+    total19: int
+    votes19: int
+
+    @classmethod
+    def empty(cls, columns: int) -> "_GroupStats":
+        """Нулевые показатели — начальное значение для сумм."""
+        return cls(0, [0] * columns, dict.fromkeys(GROUP_PLAN_PREDICATE, 0), 0, 0)
+
+    @classmethod
+    def of(cls, persons: list, predicates: list[Callable]) -> "_GroupStats":
+        """Считает показатели по списку людей."""
+        return cls(
+            people=len(persons),
+            values=[sum(1 for p in persons if pred(p)) for pred in predicates],
+            plans={
+                group: sum(1 for p in persons if plan(p))
+                for group, plan in GROUP_PLAN_PREDICATE.items()
+            },
+            total19=sum(1 for p in persons if _okrug19_total(p)),
+            votes19=sum(1 for p in persons if _okrug19_votes(p)),
+        )
+
+    def add(self, other: "_GroupStats") -> None:
+        """Прибавляет показатели другой группы (для строк «Итого» и «Всего»)."""
+        self.people += other.people
+        self.values = [a + b for a, b in zip(self.values, other.values)]
+        for group, count in other.plans.items():
+            self.plans[group] += count
+        self.total19 += other.total19
+        self.votes19 += other.votes19
+
+
+@dataclass
+class _SummaryLayout:
+    """Номера колонок и настройки отчёта «по производствам» конструктора."""
+
+    count_col: int  # «Всего» людей
+    total19_col: int  # «Всего 19 округ»
+    pred_start: int  # первая колонка-предикат
+    tail_start: int  # «Голоса Всего 19 округ»
+    short: bool
+    column_subs: list[str]  # имена подколонок (чтобы найти колонку «Всего»)
+    denominators: list[Optional[str]]  # см. _percent_denominator_groups
+
+
+def _write_summary_row(
+    sheet: Any, row: int, layout: _SummaryLayout, stats: _GroupStats
+) -> None:
+    """
+    Строка цеха или производства: числа без жирного шрифта, нули не выводятся.
+
+    В полном режиме колонки «Проголосовал» показывают процент от «Планирует»
+    этой же строки, колонка «Всего» — процент от числа людей в строке.
+    """
+    sheet.cell(row, layout.count_col, stats.people).alignment = CENTER
+    sheet.cell(row, layout.total19_col, stats.total19).alignment = CENTER
+    for offset, val in enumerate(stats.values):
+        if val <= 0:
+            continue
+        denom_group = layout.denominators[offset]
+        if not layout.short and denom_group:
+            value = _format_with_percent(val, stats.plans[denom_group])
+        elif not layout.short and layout.column_subs[offset] == "Всего":
+            value = _format_with_percent(val, stats.people)
+        else:
+            value = val
+        sheet.cell(row, layout.pred_start + offset, value).alignment = CENTER
+    _write_okrug19_tail(sheet, row, layout.tail_start, stats.total19, stats.votes19)
+
+
+def _write_summary_total(
+    sheet: Any, row: int, label: str, layout: _SummaryLayout, stats: _GroupStats
+) -> None:
+    """Строка «Итого» или «Всего по Обществу»: жирным, во всех колонках — процент."""
+    sheet.cell(row, layout.count_col - 1, label).font = BOLD
+    for col, value in (
+        (layout.count_col, stats.people),
+        (layout.total19_col, stats.total19),
+    ):
+        cell = sheet.cell(row, col, value)
+        cell.font = BOLD
+        cell.alignment = CENTER
+    for offset, val in enumerate(stats.values):
+        denom_group = layout.denominators[offset]
+        denom = stats.plans[denom_group] if denom_group else stats.people
+        cell = sheet.cell(
+            row, layout.pred_start + offset, _format_with_percent(val, denom)
+        )
+        cell.font = BOLD
+        cell.alignment = CENTERED
+    _write_okrug19_tail(
+        sheet, row, layout.tail_start, stats.total19, stats.votes19, is_total_row=True
+    )
 
 
 def custom_production_summary(
@@ -606,315 +778,101 @@ def custom_production_summary(
     Описание:
         Агрегирует данные по производствам (опционально с разбивкой по цехам).
         Показывает количество сотрудников по каждому производству и процентные
-        соотношения по колонкам из конструктора.
-
-        ВАЖНО: Использует поле service для группировки по производствам,
-        а не production. Это историческое несоответствие, см. reports/standard.py.
+        соотношения по колонкам из конструктора. Производство — поле service
+        (см. reports/production.py).
 
     Аргументы:
         params: параметры фильтров конструктора.
-        include_depts: если True, выводит строки по цехам внутри каждого производства.
+        include_depts: если True, выводит строки по цехам внутри каждого
+            производства и строку «Итого» по производству.
         moment: момент времени для заголовка отчёта.
         short: если True, для каждого способа голосования оставляются только
             подколонки "Планирует" и "Проголосовал (QR-код)", а колонки
             "Не определился" и "Уважительная причина" заменяются одной
             колонкой "Всего" — в строках "Итого"/"Всего по Обществу" она
             покажет процент проголосовавших от общего числа сотрудников.
-            Если False (полный режим), колонки "Проголосовал (QR-код)" и
-            "Проголосовал (ответственный)" в КАЖДОЙ строке (цеха или
-            производства, а не только в итоговых) показывают не голое
-            число, а процент от числа людей, планирующих голосовать этим
-            же способом в рамках этой строки (см. GROUP_PLAN_PREDICATE).
-            Колонка "Всего" в этом же режиме тоже показывает в каждой
-            строке процент — но от общего числа людей в цехе/производстве
-            этой строки (не от "Планирует").
+            Если False (полный режим), колонки "Проголосовал" в КАЖДОЙ строке
+            показывают процент от числа людей, планирующих голосовать этим
+            же способом в этой строке (см. GROUP_PLAN_PREDICATE), а колонка
+            "Всего" — процент от числа людей в строке.
 
-        Дополнительно выводятся колонки 19 округа:
-        "Всего 19 округ" (после "Всего") = "Всего людей" минус количество
-        людей в выборке по условию «не 19 округ»; после последней колонки
-        "Всего" (процент) — "Голоса Всего 19 округ" = проголосовавшие минус
-        проголосовавшие в выборке по тому же условию с voted_method вместо
-        method, и "Процент 19 Округ" (голоса 19 округа / всего 19 округа).
+        Колонки 19 округа: "Всего 19 округ" — после "Всего"; "Голоса Всего
+        19 округ" и "Процент 19 Округ" — в конце таблицы (см. _okrug19_total
+        и _okrug19_votes).
 
     Возвращает:
         Workbook: книга openpyxl со сводным отчётом.
     """
     moment = moment or timezone.localtime()
-
-    # Группировка и сортировка приведены к полю service.
-    # Это обеспечивает единообразие со стандартными отчётами "по производствам"
-    # в reports/standard.py, которые исторически используют поле service.
     people = _custom_qs(params).order_by(
         "service", "department", "surname", "name", "patronymic"
     )
 
-    book = openpyxl.Workbook()
-    sheet = book.active
-    sheet.title = "Сводный отчёт"
-    bold = Font(bold=True)
-    centered = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-    # Собираем плоский список всех предикатов для отчёта, а также имена
-    # подколонок (нужны, чтобы найти среди них колонку "Всего").
-    predicates = []
-    column_subs = []
-    for group, subs in _custom_groups(short):
+    # Плоский список предикатов и имён подколонок (нужны, чтобы найти «Всего»).
+    predicates, column_subs = [], []
+    for _group, subs in _custom_groups(short):
         for sub, predicate in subs:
             predicates.append(predicate)
             column_subs.append(sub)
 
-    # Список, параллельный predicates: для каких колонок процент нужно
-    # считать не от общего числа людей, а от количества "Планирует"
-    # соответствующей группы (см. GROUP_PLAN_PREDICATE).
-    percent_denominator_groups = _percent_denominator_groups(short, with_total=True)
-
-    # Заголовки ведущих колонок.
-    lead_headers = (
-        ("Производство", "Цех", "Всего", "Всего 19 округ")
-        if include_depts
-        else ("Производство", "Всего", "Всего 19 округ")
+    leads = lead_headers(include_depts)
+    pred_start = len(leads) + 1
+    layout = _SummaryLayout(
+        count_col=len(leads) - 1,
+        total19_col=len(leads),
+        pred_start=pred_start,
+        tail_start=pred_start + len(predicates),
+        short=short,
+        column_subs=column_subs,
+        denominators=_percent_denominator_groups(short, with_total=True),
     )
-    total_columns = len(lead_headers) + len(predicates) + len(OKRUG19_TAIL_HEADERS)
-    # Номер первой колонки с предикатами и первой колонки "хвоста" 19 округа.
-    pred_start = len(lead_headers) + 1
-    tail_start = pred_start + len(predicates)
+    total_columns = len(leads) + len(predicates) + len(OKRUG19_TAIL_HEADERS)
 
-    # Главный заголовок отчёта.
-    title = sheet.cell(
-        1, 1, f"Итоговый отчёт по видам производства на {moment:%d.%m.%y %H:%M}"
-    )
-    title.font = Font(bold=True, size=12)
-    title.alignment = centered
-    sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_columns)
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "Сводный отчёт"
 
-    # Отрисовка заголовков колонок.
-    header_row = 2
-    column = 1
-    for title_text in lead_headers:
-        sheet.merge_cells(
-            start_row=header_row,
-            start_column=column,
-            end_row=header_row + 1,
-            end_column=column,
-        )
-        cell = sheet.cell(header_row, column, title_text)
-        cell.font = bold
-        cell.alignment = centered
-        column += 1
+    # Шапка: заголовок, ведущие колонки, группы способов, колонки 19 округа.
+    write_title(sheet, moment, total_columns)
+    column = draw_lead_headers(sheet, leads)
+    _draw_custom_groups(sheet, start_row=HEADER_ROW, start_col=column, short=short)
+    _draw_okrug19_tail_headers(sheet, HEADER_ROW, layout.tail_start)
 
-    _draw_custom_groups(sheet, start_row=header_row, start_col=column, short=short)
-    _draw_okrug19_tail_headers(sheet, header_row, tail_start)
-
-    # Настройка ширины колонок.
-    widths = (
-        (16, 14, 10, 12) + (12,) * len(predicates) + (14, 12)
-        if include_depts
-        else (24, 10, 12) + (12,) * len(predicates) + (14, 12)
-    )
+    lead_widths = (16, 14, 10, 12) if include_depts else (24, 10, 12)
+    widths = lead_widths + (12,) * len(predicates) + (14, 12)
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
-
     sheet.freeze_panes = "A4"
 
-    # Группировка данных в памяти для быстрого агрегирования.
-    if include_depts:
-        data = defaultdict(lambda: defaultdict(list))
-    else:
-        data = defaultdict(list)
+    data = group_people(people.iterator(chunk_size=2000), include_depts)
+    grand = _GroupStats.empty(len(predicates))
+    row = FIRST_DATA_ROW
 
-    # Итератор с пачками по 2000 строк защищает от переполнения памяти.
-    for person in people.iterator(chunk_size=2000):
-        # Используем поле service для определения производства,
-        # чтобы соответствовать стандартным отчётам.
-        production_name = person.service or NO_PRODUCTION
-        if include_depts:
-            data[production_name][person.department].append(person)
-        else:
-            data[production_name].append(person)
-
-    row = header_row + 2
-    grand_total_people = 0
-    grand_totals = [0] * len(predicates)
-    grand_total19 = 0
-    grand_votes19 = 0
-    # Счётчики "Планирует" по каждой группе способов голосования (для всего
-    # общества) — знаменатель процента для колонок "Проголосовал (QR-код)".
-    grand_plan_counts: dict[str, int] = defaultdict(int)
-
-    # Сортировка производств: обычные по алфавиту, "Без производства" всегда в конце.
-    for production in sorted(
-        data.keys(), key=lambda name: (name == NO_PRODUCTION, name)
-    ):
-        if include_depts:
-            # Заголовок производства (объединяем все колонки).
-            sheet.merge_cells(
-                start_row=row, start_column=1, end_row=row, end_column=total_columns
-            )
-            sheet.cell(row, 1, production).font = bold
-            sheet.cell(row, 1).alignment = Alignment(horizontal="center")
-            row += 1
-
-            prod_total_people = 0
-            prod_totals = [0] * len(predicates)
-            # Счётчики "Планирует" по каждой группе — знаменатель процента
-            # для колонок "Проголосовал (QR-код)" в рамках производства.
-            prod_plan_counts: dict[str, int] = defaultdict(int)
-            prod_total19 = 0
-            prod_votes19 = 0
-
-            # Сортировка цехов внутри производства.
-            for department in sorted(data[production].keys(), key=_by_number):
-                persons = data[production][department]
-                count = len(persons)
-                prod_total_people += count
-                grand_total_people += count
-
-                sheet.cell(row, 1, production)
-                sheet.cell(row, 2, padded_number(department))
-                sheet.cell(row, 3, count).alignment = Alignment(horizontal="center")
-
-                dept_total19 = sum(1 for p in persons if _okrug19_total(p))
-                dept_votes19 = sum(1 for p in persons if _okrug19_votes(p))
-                prod_total19 += dept_total19
-                prod_votes19 += dept_votes19
-                grand_total19 += dept_total19
-                grand_votes19 += dept_votes19
-                sheet.cell(row, 4, dept_total19).alignment = Alignment(
-                    horizontal="center"
-                )
-
-                # Локальные счётчики "Планирует" по этому цеху — нужны, чтобы
-                # в полном режиме (short=False) показать в самой строке цеха
-                # процент "проголосовало из планирующих", а не голое число.
-                dept_plan_counts: dict[str, int] = {}
-                for group, plan_predicate in GROUP_PLAN_PREDICATE.items():
-                    plan_val = sum(1 for p in persons if plan_predicate(p))
-                    dept_plan_counts[group] = plan_val
-                    prod_plan_counts[group] += plan_val
-                    grand_plan_counts[group] += plan_val
-
-                # Подсчёт значений по предикатам для данного цеха.
-                for offset, predicate in enumerate(predicates):
-                    val = sum(1 for p in persons if predicate(p))
-                    if val > 0:
-                        denom_group = percent_denominator_groups[offset]
-                        if not short and denom_group:
-                            cell_value = _format_with_percent(
-                                val, dept_plan_counts[denom_group]
-                            )
-                        elif not short and column_subs[offset] == "Всего":
-                            cell_value = _format_with_percent(val, count)
-                        else:
-                            cell_value = val
-                        sheet.cell(row, pred_start + offset, cell_value).alignment = (
-                            Alignment(horizontal="center")
-                        )
-                    prod_totals[offset] += val
-                    grand_totals[offset] += val
-                _write_okrug19_tail(sheet, row, tail_start, dept_total19, dept_votes19)
-                row += 1
-
-            # Строка Итого по производству.
-            sheet.cell(row, 2, "Итого").font = bold
-            sheet.cell(row, 3, prod_total_people).font = bold
-            sheet.cell(row, 3).alignment = Alignment(horizontal="center")
-            sheet.cell(row, 4, prod_total19).font = bold
-            sheet.cell(row, 4).alignment = Alignment(horizontal="center")
-            for offset, val in enumerate(prod_totals):
-                denom_group = percent_denominator_groups[offset]
-                denom = (
-                    prod_plan_counts[denom_group] if denom_group else prod_total_people
-                )
-                cell = sheet.cell(
-                    row, pred_start + offset, _format_with_percent(val, denom)
-                )
-                cell.font = bold
-                cell.alignment = centered
-            _write_okrug19_tail(
-                sheet, row, tail_start, prod_total19, prod_votes19, is_total_row=True
-            )
-            row += 1
-        else:
-            # Режим без разбивки по цехам.
-            persons = data[production]
-            count = len(persons)
-            grand_total_people += count
-
+    for production in production_order(data):
+        if not include_depts:
+            # Одна строка на производство.
+            stats = _GroupStats.of(data[production], predicates)
             sheet.cell(row, 1, production)
-            sheet.cell(row, 2, count).alignment = Alignment(horizontal="center")
-
-            local_total19 = sum(1 for p in persons if _okrug19_total(p))
-            local_votes19 = sum(1 for p in persons if _okrug19_votes(p))
-            grand_total19 += local_total19
-            grand_votes19 += local_votes19
-            sheet.cell(row, 3, local_total19).alignment = Alignment(horizontal="center")
-
-            # Локальные счётчики "Планирует" по этому производству — та же
-            # логика, что и для цеха выше.
-            local_plan_counts: dict[str, int] = {}
-            for group, plan_predicate in GROUP_PLAN_PREDICATE.items():
-                plan_val = sum(1 for p in persons if plan_predicate(p))
-                local_plan_counts[group] = plan_val
-                grand_plan_counts[group] += plan_val
-
-            for offset, predicate in enumerate(predicates):
-                val = sum(1 for p in persons if predicate(p))
-                if val > 0:
-                    denom_group = percent_denominator_groups[offset]
-                    if not short and denom_group:
-                        cell_value = _format_with_percent(
-                            val, local_plan_counts[denom_group]
-                        )
-                    elif not short and column_subs[offset] == "Всего":
-                        cell_value = _format_with_percent(val, count)
-                    else:
-                        cell_value = val
-                    sheet.cell(row, pred_start + offset, cell_value).alignment = (
-                        Alignment(horizontal="center")
-                    )
-                grand_totals[offset] += val
-            _write_okrug19_tail(sheet, row, tail_start, local_total19, local_votes19)
+            _write_summary_row(sheet, row, layout, stats)
+            grand.add(stats)
             row += 1
+            continue
 
-    # Строка Всего по Обществу.
-    if include_depts:
-        sheet.cell(row, 2, "Всего по Обществу").font = bold
-        sheet.cell(row, 3, grand_total_people).font = bold
-        sheet.cell(row, 3).alignment = Alignment(horizontal="center")
-        sheet.cell(row, 4, grand_total19).font = bold
-        sheet.cell(row, 4).alignment = Alignment(horizontal="center")
-        for offset, val in enumerate(grand_totals):
-            denom_group = percent_denominator_groups[offset]
-            denom = (
-                grand_plan_counts[denom_group] if denom_group else grand_total_people
-            )
-            cell = sheet.cell(
-                row, pred_start + offset, _format_with_percent(val, denom)
-            )
-            cell.font = bold
-            cell.alignment = centered
-        _write_okrug19_tail(
-            sheet, row, tail_start, grand_total19, grand_votes19, is_total_row=True
-        )
-    else:
-        sheet.cell(row, 1, "Всего по Обществу").font = bold
-        sheet.cell(row, 2, grand_total_people).font = bold
-        sheet.cell(row, 2).alignment = Alignment(horizontal="center")
-        sheet.cell(row, 3, grand_total19).font = bold
-        sheet.cell(row, 3).alignment = Alignment(horizontal="center")
-        for offset, val in enumerate(grand_totals):
-            denom_group = percent_denominator_groups[offset]
-            denom = (
-                grand_plan_counts[denom_group] if denom_group else grand_total_people
-            )
-            cell = sheet.cell(
-                row, pred_start + offset, _format_with_percent(val, denom)
-            )
-            cell.font = bold
-            cell.alignment = centered
-        _write_okrug19_tail(
-            sheet, row, tail_start, grand_total19, grand_votes19, is_total_row=True
-        )
+        # Название производства, строки его цехов и строка «Итого».
+        write_production_heading(sheet, row, production, total_columns)
+        row += 1
+        subtotal = _GroupStats.empty(len(predicates))
+        for department in sorted(data[production], key=_by_number):
+            stats = _GroupStats.of(data[production][department], predicates)
+            sheet.cell(row, 1, production)
+            sheet.cell(row, 2, padded_number(department))
+            _write_summary_row(sheet, row, layout, stats)
+            subtotal.add(stats)
+            row += 1
+        _write_summary_total(sheet, row, "Итого", layout, subtotal)
+        grand.add(subtotal)
+        row += 1
 
+    _write_summary_total(sheet, row, "Всего по Обществу", layout, grand)
     _apply_border(sheet)
     return book

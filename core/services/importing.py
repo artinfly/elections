@@ -10,13 +10,16 @@
 import io
 import zipfile
 from datetime import date, datetime, time
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator, Optional
 
 from django.db.models import F
 from django.utils import timezone
 
 from ..models import DEG, UIK, UIK19, UVZ, Employee
 from .excel import BATCH, COLUMNS, _date, _header, _sheet, _text
+
+# Сообщение для загрузки, которая не является ZIP-архивом.
+BAD_ZIP = "Ошибка: файл не является корректным ZIP-архивом"
 
 # ==============================================================================
 # Импорт основной базы
@@ -220,92 +223,264 @@ def _combine_datetime(date_val: Any, time_val: Any) -> datetime:
     return dt
 
 
+def _workbooks(upload: Any) -> Iterator[Any]:
+    """
+    Книги Excel из загруженного файла: сам файл (.xlsx) или все .xlsx из ZIP.
+
+    Служебные папки macOS (__MACOSX) и файлы других типов в архиве пропускаются.
+
+    Исключения:
+        ValueError: если файл с расширением .zip не является ZIP-архивом.
+    """
+    if not upload.name.lower().endswith(".zip"):
+        yield upload
+        return
+    try:
+        archive = zipfile.ZipFile(upload, "r")
+    except zipfile.BadZipFile as exc:
+        raise ValueError(BAD_ZIP) from exc
+    with archive:
+        for info in archive.infolist():
+            name = info.filename
+            if name.endswith(".xlsx") and not name.startswith("__MACOSX"):
+                yield io.BytesIO(archive.read(name))
+
+
+def _tab(value: Any) -> str:
+    """Табельный номер из ячейки: только цифры, дополненные нулями до 7 знаков; иначе ""."""
+    tab = _text(value)
+    return tab.zfill(7) if tab.isdigit() else ""
+
+
 def import_turnout_hq_archive(upload: Any) -> tuple[int, int, int]:
     """
     Импорт отметок явки из ZIP-архива отчётов штаба с датой и временем.
 
     Описание:
-        Ожидаемые индексы колонок в строке:
-        0: табельный номер
-        4: дата
-        5: время
-
-        Если у сотрудника не выбран способ голосования, ему автоматически
-        присваивается UIK при отметке явки.
+        В каждой книге первая строка — шапка, дальше по колонкам:
+        0 — табельный номер, 4 — дата, 5 — время голосования.
+        Если у сотрудника не выбран способ голосования, при отметке явки
+        ему ставится UIK.
 
     Возвращает:
         tuple[int, int, int]: (изменено, всего строк, ошибок/пропусков).
     """
-    total_rows = 0
-    total_errors = 0
-    all_tabs_data = {}
+    total_rows = total_errors = 0
+    voted_at = {}  # табельный номер -> время голосования
 
-    try:
-        with zipfile.ZipFile(upload, "r") as zip_ref:
-            for file_info in zip_ref.infolist():
-                if file_info.filename.endswith(
-                    ".xlsx"
-                ) and not file_info.filename.startswith("__MACOSX"):
-                    file_content = io.BytesIO(zip_ref.read(file_info.filename))
-                    with _sheet(file_content) as rows:
-                        all_rows = list(rows)
+    for workbook in _workbooks(upload):
+        with _sheet(workbook) as rows:
+            all_rows = list(rows)
+        for row in all_rows[1:]:
+            if not any(row):
+                continue
+            total_rows += 1
+            tab = _tab(row[0])
+            if not tab:
+                total_errors += 1
+                continue
+            date_val = row[4] if len(row) > 4 else None
+            time_val = row[5] if len(row) > 5 else None
+            voted_at[tab] = _combine_datetime(date_val, time_val)
 
-                    if len(all_rows) < 2:
-                        continue
-
-                    for row in all_rows[1:]:
-                        if not any(row):
-                            continue
-                        total_rows += 1
-                        try:
-                            tab = _text(row[0] if len(row) > 0 else None)
-                            if not tab or not str(tab).isdigit():
-                                total_errors += 1
-                                continue
-                            tab = str(tab).zfill(7)
-
-                            date_val = row[4] if len(row) > 4 else None
-                            time_val = row[5] if len(row) > 5 else None
-
-                            all_tabs_data[tab] = _combine_datetime(date_val, time_val)
-
-                        except Exception:
-                            total_errors += 1
-    except zipfile.BadZipFile:
-        raise ValueError("Ошибка: файл не является корректным ZIP-архивом.")
-
-    if not all_tabs_data:
+    if not voted_at:
         return 0, total_rows, total_errors
 
-    tabs_list = list(all_tabs_data.keys())
-    found = Employee.objects.filter(tab_number__in=tabs_list)
-
+    found = list(Employee.objects.filter(tab_number__in=voted_at))
     # Ошибки — табельные номера, которых нет в базе. Люди без способа голосования
-    # ошибкой не считаются: ниже им ставится УИК и они отмечаются как проголосовавшие
-    total_errors += len(tabs_list) - found.count()
+    # ошибкой не считаются: им ставится УИК и они отмечаются как проголосовавшие
+    total_errors += len(voted_at) - len(found)
 
-    employees_to_update = []
     for emp in found:
         emp.voted = True
-        emp.voted_at = all_tabs_data[emp.tab_number]
-        if not emp.method:
-            emp.method = UIK
+        emp.voted_at = voted_at[emp.tab_number]
+        emp.method = emp.method or UIK
         emp.voted_method = emp.method
-        employees_to_update.append(emp)
-
-    if employees_to_update:
+    if found:
         Employee.objects.bulk_update(
-            employees_to_update,
+            found,
             fields=["voted", "voted_at", "voted_method", "method"],
             batch_size=BATCH,
         )
-
-    return len(employees_to_update), total_rows, total_errors
+    return len(found), total_rows, total_errors
 
 
 # ==============================================================================
 # Импорт кастомного сводного отчёта
 # ==============================================================================
+
+# Колонки отчёта: (ключ, условие по названию группы и подколонки в нижнем регистре).
+# Проверяются по порядку, колонке достаётся первый подошедший ключ.
+CUSTOM_REPORT_COLUMNS: list[tuple[str, Callable[[str, str], bool]]] = [
+    ("tab", lambda g, s: "таб.№" in g + s or "табельный" in g + s),
+    ("plan_deg", lambda g, s: "дэг" in g and "планирует" in s),
+    ("mark_deg", lambda g, s: "дэг" in g and "зарегистрирован" in s),
+    ("voted_deg", lambda g, s: "дэг" in g and "проголосовал" in s),
+    (
+        "plan_uik",
+        lambda g, s: "на участке" in g and "увз" not in g and "планирует" in s,
+    ),
+    (
+        "voted_uik",
+        lambda g, s: "на участке" in g and "увз" not in g and "проголосовал" in s,
+    ),
+    ("plan_uvz", lambda g, s: "увз" in g and "планирует" in s),
+    ("voted_uvz", lambda g, s: "увз" in g and "проголосовал" in s),
+    ("plan_u19", lambda g, s: "19" in g and "планирует" in s),
+    ("detached", lambda g, s: "19" in g and "открепился" in s),
+    ("voted_u19", lambda g, s: "19" in g and "проголосовал" in s),
+    ("absence", lambda g, s: "уважительная" in g + s or "причина" in g + s),
+    ("not_going", lambda g, s: "не пойдет" in g + s or "не пойдёт" in g + s),
+]
+
+# Колонки «Планирует» и «Проголосовал» -> способ голосования (первая отметка побеждает).
+PLAN_COLUMNS = (
+    ("plan_deg", DEG),
+    ("plan_uik", UIK),
+    ("plan_uvz", UVZ),
+    ("plan_u19", UIK19),
+)
+VOTED_COLUMNS = (
+    ("voted_deg", DEG),
+    ("voted_uik", UIK),
+    ("voted_uvz", UVZ),
+    ("voted_u19", UIK19),
+)
+
+# Отметки, при которых «Уважительная причина» из файла не ставится.
+MARKS_OVER_ABSENCE = ("method", "mark_deg", "detached", "not_going", "voted")
+
+
+def _custom_report_columns(group_row: tuple, sub_row: tuple) -> dict[str, int]:
+    """
+    Номера колонок отчёта по двухстрочной шапке (группа + подколонка).
+
+    Название группы стоит в объединённой ячейке только над первой подколонкой,
+    поэтому оно протягивается вправо до следующего непустого названия.
+    """
+    columns = {}
+    group = ""
+    for index, cell in enumerate(group_row):
+        group = str(cell or "").strip().lower() or group
+        sub = (
+            str((sub_row[index] if index < len(sub_row) else None) or "")
+            .strip()
+            .lower()
+        )
+        for key, matches in CUSTOM_REPORT_COLUMNS:
+            if matches(group, sub):
+                columns[key] = index
+                break
+    return columns
+
+
+def _has_mark(row: tuple, index: Optional[int]) -> bool:
+    """Есть ли отметка в ячейке: любое непустое значение (так задумано)."""
+    return (
+        index is not None and index < len(row) and bool(str(row[index] or "").strip())
+    )
+
+
+def _row_changes(row: tuple, columns: dict[str, int]) -> dict[str, Any]:
+    """Поля сотрудника, которые нужно изменить по одной строке отчёта."""
+    marked = lambda key: _has_mark(row, columns.get(key))  # noqa: E731
+    changes: dict[str, Any] = {}
+
+    method = next((m for key, m in PLAN_COLUMNS if marked(key)), None)
+    if method:
+        changes["method"] = method
+    if marked("mark_deg"):
+        changes.update(method=DEG, mark_deg=True)
+    if marked("detached"):
+        changes.update(method=UIK19, detached=True)
+    if marked("not_going"):
+        changes["not_going"] = True
+    if marked("absence"):
+        changes["absence"] = True
+
+    voted_method = next((m for key, m in VOTED_COLUMNS if marked(key)), None)
+    if voted_method:
+        changes.update(voted=True, voted_method=voted_method)
+    return changes
+
+
+def _save_changes(updates: dict[str, dict]) -> tuple[int, int]:
+    """
+    Записывает изменения в базу.
+
+    Обновляются только реально изменившиеся сотрудники и только поля,
+    которые встречаются в файле, — остальные данные не перезаписываются.
+
+    Возвращает:
+        tuple[int, int]: (изменено сотрудников, табельных номеров нет в базе).
+    """
+    existing = {
+        e.tab_number: e for e in Employee.objects.filter(tab_number__in=updates)
+    }
+    to_update = []
+    for tab, fields in updates.items():
+        emp = existing.get(tab)
+        if emp is None:
+            continue
+        changed = [f for f, value in fields.items() if getattr(emp, f) != value]
+        for field in changed:
+            setattr(emp, field, fields[field])
+        if changed:
+            to_update.append(emp)
+
+    if to_update:
+        fields_in_file = list(
+            {field for fields in updates.values() for field in fields}
+        )
+        Employee.objects.bulk_update(to_update, fields=fields_in_file, batch_size=BATCH)
+    return len(to_update), len(updates) - len(existing)
+
+
+def _import_custom_sheet(all_rows: list) -> tuple[int, int, int]:
+    """
+    Импорт одного листа кастомного отчёта.
+
+    Возвращает:
+        tuple[int, int, int]: (изменено, строк данных, ошибок).
+    """
+    if len(all_rows) < 3:
+        return 0, 0, 0
+
+    # Шапка — первая строка с табельным номером, под ней строка подколонок.
+    header = next(
+        (
+            i
+            for i, row in enumerate(all_rows)
+            if any(
+                "таб.№" in str(c).lower() or "табельный" in str(c).lower()
+                for c in row
+                if c
+            )
+        ),
+        0,
+    )
+    columns = _custom_report_columns(all_rows[header], all_rows[header + 1])
+    if "tab" not in columns:
+        return 0, 0, 1  # лист без табельных номеров
+
+    updates: dict[str, dict] = {}
+    rows = errors = 0
+    for row in all_rows[header + 2 :]:
+        if not any(row):
+            continue
+        rows += 1
+        tab = _tab(row[columns["tab"]]) if columns["tab"] < len(row) else ""
+        if not tab:
+            errors += 1
+            continue
+        updates.setdefault(tab, {}).update(_row_changes(row, columns))
+
+    for fields in updates.values():
+        if any(fields.get(mark) for mark in MARKS_OVER_ABSENCE):
+            fields.pop("absence", None)
+
+    changed, missing = _save_changes(updates) if updates else (0, 0)
+    return changed, rows, errors + missing
 
 
 def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
@@ -313,225 +488,19 @@ def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
     Импортирует данные из кастомного сводного отчёта (Excel или ZIP с Excel).
 
     Описание:
-        Распознает сложные заголовки с объединенными ячейками (группа + подгруппа)
-        и обновляет соответствующие поля сотрудника: способ, явку, служебные отметки.
+        Распознаёт двухстрочную шапку с объединёнными ячейками (группа +
+        подколонка) и обновляет поля сотрудника: способ, явку, служебные
+        отметки. Каждая книга обрабатывается и сохраняется отдельно.
 
     Возвращает:
         tuple[int, int, int]: (изменено, всего строк, ошибок/пропусков).
     """
-    total_changed = 0
-    total_rows = 0
-    total_errors = 0
-
-    def _get_col_indices(header_rows: list) -> dict:
-        """
-        Сопоставляет индексы колонок Excel с внутренними полями модели Employee.
-        """
-
-        def _fill_empty_group(header_row):
-            """Протягивает название группы вправо по объединённым ячейкам шапки."""
-            filled = []
-            last = ""
-            for val in header_row:
-                text = str(val or "").strip().lower()
-                if text:
-                    last = text
-                filled.append(last)
-            return filled
-
-        group_row = _fill_empty_group(header_rows[0])
-        sub_row = header_rows[1]
-        indices = {}
-
-        for c_idx in range(len(group_row)):
-            group = group_row[c_idx]
-            sub = str(sub_row[c_idx] or "").strip().lower()
-            combined = f"{group}{sub}"
-
-            if "таб.№" in combined or "табельный" in combined:
-                indices["tab"] = c_idx
-            elif "дэг" in group and "планирует" in sub:
-                indices["plan_deg"] = c_idx
-            elif "дэг" in group and "зарегистрирован" in sub:
-                indices["mark_deg"] = c_idx
-            elif "дэг" in group and "проголосовал" in sub:
-                indices["voted_deg"] = c_idx
-            elif "на участке" in group and "увз" not in group and "планирует" in sub:
-                indices["plan_uik"] = c_idx
-            elif "на участке" in group and "увз" not in group and "проголосовал" in sub:
-                indices["voted_uik"] = c_idx
-            elif "увз" in group and "планирует" in sub:
-                indices["plan_uvz"] = c_idx
-            elif "увз" in group and "проголосовал" in sub:
-                indices["voted_uvz"] = c_idx
-            elif "19" in group and "планирует" in sub:
-                indices["plan_u19"] = c_idx
-            elif "19" in group and "открепился" in sub:
-                indices["detached"] = c_idx
-            elif "19" in group and "проголосовал" in sub:
-                indices["voted_u19"] = c_idx
-            elif "уважительная" in combined or "причина" in combined:
-                indices["absence"] = c_idx
-            elif "не пойдет" in combined or "не пойдёт" in combined:
-                indices["not_going"] = c_idx
-
-        return indices
-
-    def _has_mark(row: list, idx: int) -> bool:
-        """
-        Проверяет, содержит ли ячейка по заданному индексу положительную отметку.
-        """
-        if idx is None or idx >= len(row):
-            return False
-        val = str(row[idx] or "").strip().lower()
-        return bool(val)
-
-    def process_sheet(all_rows: list, filename: str):
-        """Разбирает один лист: находит шапку, собирает изменения и пишет их в базу."""
-        nonlocal total_changed, total_rows, total_errors
-        if len(all_rows) < 3:
-            return
-
-        header_idx = 0
-        for idx, row in enumerate(all_rows):
-            if any(
-                "таб.№" in str(c).lower() or "табельный" in str(c).lower()
-                for c in row
-                if c
-            ):
-                header_idx = idx
-                break
-
-        header_rows = [all_rows[header_idx], all_rows[header_idx + 1]]
-        indices = _get_col_indices(header_rows)
-
-        if "tab" not in indices:
-            # Лист без колонки табельного номера — считаем ошибкой и пропускаем
-            total_errors += 1
-            return
-
-        updates = {}
-
-        for row in all_rows[header_idx + 2 :]:
-            if not any(row):
-                continue
-            total_rows += 1
-
-            try:
-                tab = _text(row[indices["tab"]])
-                if not tab or not str(tab).isdigit():
-                    total_errors += 1
-                    continue
-                tab = str(tab).zfill(7)
-
-                if tab not in updates:
-                    updates[tab] = {}
-
-                u = updates[tab]
-
-                if _has_mark(row, indices.get("plan_deg")):
-                    u["method"] = DEG
-                elif _has_mark(row, indices.get("plan_uik")):
-                    u["method"] = UIK
-                elif _has_mark(row, indices.get("plan_uvz")):
-                    u["method"] = UVZ
-                elif _has_mark(row, indices.get("plan_u19")):
-                    u["method"] = UIK19
-
-                if _has_mark(row, indices.get("mark_deg")):
-                    u["method"] = DEG
-                    u["mark_deg"] = True
-
-                if _has_mark(row, indices.get("detached")):
-                    u["method"] = UIK19
-                    u["detached"] = True
-
-                if _has_mark(row, indices.get("not_going")):
-                    u["not_going"] = True
-
-                if _has_mark(row, indices.get("absence")):
-                    u["absence"] = True
-
-                if _has_mark(row, indices.get("voted_deg")):
-                    u["voted"] = True
-                    u["voted_method"] = DEG
-                elif _has_mark(row, indices.get("voted_uik")):
-                    u["voted"] = True
-                    u["voted_method"] = UIK
-                elif _has_mark(row, indices.get("voted_uvz")):
-                    u["voted"] = True
-                    u["voted_method"] = UVZ
-                elif _has_mark(row, indices.get("voted_u19")):
-                    u["voted"] = True
-                    u["voted_method"] = UIK19
-
-            except Exception:
-                total_errors += 1
-                continue
-
-        # Если у человека есть любая другая отметка (способ, регистрация, явка и т.д.),
-        # «Уважительная причина» из файла не ставится. Проверяются именно поля модели,
-        # которые заполняются выше: раньше здесь стояли названия колонок файла
-        # (plan_deg, voted_uik…), их в словаре нет, и отметка УП не снималась.
-        other_marks = ("method", "mark_deg", "detached", "not_going", "voted")
-        for fields in updates.values():
-            if any(fields.get(m) for m in other_marks):
-                fields.pop("absence", None)
-
-        if updates:
-            tabs_list = list(updates.keys())
-            existing = {
-                emp.tab_number: emp
-                for emp in Employee.objects.filter(tab_number__in=tabs_list)
-            }
-
-            to_update = []
-            for tab, fields in updates.items():
-                emp = existing.get(tab)
-                if not emp:
-                    total_errors += 1
-                    continue
-
-                changed = False
-                for field, value in fields.items():
-                    if getattr(emp, field) != value:
-                        setattr(emp, field, value)
-                        changed = True
-
-                if changed:
-                    to_update.append(emp)
-
-            if to_update:
-                # Собираем уникальный набор полей, которые были изменены в текущем пакете,
-                # чтобы обновить в базе только их и не перезаписывать остальные данные.
-                updated_fields = list(
-                    {field for u in updates.values() for field in u.keys()}
-                )
-                Employee.objects.bulk_update(
-                    to_update,
-                    fields=updated_fields,
-                    batch_size=BATCH,
-                )
-                total_changed += len(to_update)
-
-    try:
-        if upload.name.lower().endswith(".zip"):
-            with zipfile.ZipFile(upload, "r") as zip_ref:
-                for file_info in zip_ref.infolist():
-                    if file_info.filename.endswith(
-                        ".xlsx"
-                    ) and not file_info.filename.startswith("__MACOSX"):
-                        file_content = io.BytesIO(zip_ref.read(file_info.filename))
-                        with _sheet(file_content) as rows:
-                            process_sheet(list(rows), filename=file_info.filename)
-        else:
-            with _sheet(upload) as rows:
-                process_sheet(list(rows), filename=upload.name)
-
-    except zipfile.BadZipFile:
-        raise ValueError("Ошибка: файл не является корректным zip-архивом")
-
-    return total_changed, total_rows, total_errors
+    totals = [0, 0, 0]
+    for workbook in _workbooks(upload):
+        with _sheet(workbook) as rows:
+            result = _import_custom_sheet(list(rows))
+        totals = [a + b for a, b in zip(totals, result)]
+    return tuple(totals)
 
 
 # ==============================================================================
@@ -545,6 +514,8 @@ RESPONSIBLE_COLUMNS = {
     "Отметка": "mark",
 }
 
+# Другие написания заголовков, которые встречаются в файлах цехов
+# (в том числе набранные в английской раскладке: «nf,tkmysq» = «табельный»).
 HEADER_ALIASES = {
     "Таб": [
         "таб",
@@ -571,77 +542,63 @@ HEADER_ALIASES = {
 }
 
 
+def _responsible_tabs(workbook: Any) -> tuple[set[str], int, int]:
+    """
+    Табельные номера с отметкой из одной книги.
+
+    Возвращает:
+        tuple: (номера с непустой отметкой, строк данных, ошибок).
+    """
+    with _sheet(workbook) as rows:
+        try:
+            positions = _header(rows, RESPONSIBLE_COLUMNS, aliases=HEADER_ALIASES)
+        except ValueError:
+            return set(), 0, 1
+        tab_idx, mark_idx = positions.get("Таб"), positions.get("Отметка")
+        if tab_idx is None or mark_idx is None:
+            return set(), 0, 1
+
+        marked, total, errors = set(), 0, 0
+        for row in rows:
+            if not any(row):
+                continue
+            total += 1
+            tab = _text(row[tab_idx] if tab_idx < len(row) else None)
+            if not tab:
+                errors += 1
+                continue
+            # Отметка — любое значение, в том числе 0 (ячейка «0» тоже считается)
+            if _text(row[mark_idx] if mark_idx < len(row) else None):
+                marked.add(tab.zfill(7) if tab.isdigit() else tab)
+    return marked, total, errors
+
+
 def import_responsible_marks(upload: Any) -> tuple[int, int, int]:
     """
     Импортирует отметки «Голосование через ответственного» из Excel или ZIP.
 
     Описание:
         Ищет колонки «Таб» и «Отметка». Если в колонке «Отметка» есть любое
-        непустое значение, сотруднику проставляется флаг proxy_vote и текущее время.
+        непустое значение, сотруднику ставится proxy_vote. Время отметки
+        записывается только тем, у кого его ещё нет (у проголосовавших
+        по QR-коду время голосования не затирается).
 
     Возвращает:
         tuple[int, int, int]: (изменено, всего строк, ошибок/пропусков).
     """
-    total_rows = 0
-    total_errors = 0
-    marked_tabs = set()
-
-    def process_workbook(file_obj: Any) -> None:
-        """Собирает табельные номера с отметкой из одной книги Excel."""
-        nonlocal total_rows, total_errors
-        with _sheet(file_obj) as rows:
-            try:
-                positions = _header(rows, RESPONSIBLE_COLUMNS, aliases=HEADER_ALIASES)
-            except ValueError:
-                total_errors += 1
-                return
-
-            tab_idx = positions.get("Таб")
-            mark_idx = positions.get("Отметка")
-            if tab_idx is None or mark_idx is None:
-                total_errors += 1
-                return
-
-            for row in rows:
-                if not any(row):
-                    continue
-                total_rows += 1
-
-                tab = _text(row[tab_idx] if tab_idx < len(row) else None)
-                if not tab:
-                    total_errors += 1
-                    continue
-                if tab.isdigit():
-                    tab = tab.zfill(7)
-
-                mark_val = row[mark_idx] if mark_idx < len(row) else None
-                if not _text(mark_val).strip():
-                    continue
-
-                marked_tabs.add(tab)
-
-    try:
-        if upload.name.lower().endswith(".zip"):
-            with zipfile.ZipFile(upload, "r") as zip_ref:
-                for file_info in zip_ref.infolist():
-                    if file_info.filename.endswith(
-                        ".xlsx"
-                    ) and not file_info.filename.startswith("__MACOSX"):
-                        file_content = io.BytesIO(zip_ref.read(file_info.filename))
-                        process_workbook(file_content)
-        else:
-            process_workbook(upload)
-    except zipfile.BadZipFile:
-        raise ValueError("Ошибка: файл не является корректным ZIP-архивом")
+    marked_tabs: set[str] = set()
+    total_rows = total_errors = 0
+    for workbook in _workbooks(upload):
+        tabs, rows, errors = _responsible_tabs(workbook)
+        marked_tabs |= tabs
+        total_rows += rows
+        total_errors += errors
 
     if not marked_tabs:
         return 0, total_rows, total_errors
 
     found = Employee.objects.filter(tab_number__in=marked_tabs)
     changed = found.update(proxy_vote=True)
-    # Время отметки ставим только тем, у кого его ещё нет: у проголосовавших
-    # по QR-коду оно уже записано, и раньше этот импорт его перезаписывал
     found.filter(voted_at__isnull=True).update(voted_at=timezone.now())
     total_errors += len(marked_tabs) - found.count()
-
     return changed, total_rows, total_errors
