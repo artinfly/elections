@@ -39,6 +39,7 @@ copy .env.example .env            # и заполните значения
 python manage.py migrate
 python manage.py createsuperuser
 python manage.py setup_groups
+python manage.py seed_demo        # по желанию: вымышленные сотрудники и явка
 python manage.py runserver
 ```
 
@@ -73,7 +74,8 @@ gunicorn config.wsgi --bind 127.0.0.1:8000
 ```text
 config/                       настройки (settings/base, dev, prod), корневые адреса, wsgi/asgi
 apps/
-└── api/                      JSON API для отдельного фронтенда (адреса /api/…)
+├── api/                      JSON API для отдельного фронтенда (адреса /api/…)
+└── demo/                     демо-данные seed_demo (только для разработки)
 docs/api.md                   описание JSON API
 core/                         приложение «Учёт голосования»
 ├── models.py                 EmployeeBase → Employee и EmployeeArchive, Profile; коды способов
@@ -199,6 +201,15 @@ python manage.py import_workshops --host <адрес> --dbname <база> --user
 Покровское-1, а план — не «УИК-19» (`core/services/reports/custom.py`).
 В отчёте ВН не учитываются не проголосовавшие с отметкой «Уважительная причина».
 
+## Демо-данные (только для разработки)
+
+```bash
+python manage.py seed_demo --people 600 --seed 1
+```
+
+Заменяет всех сотрудников вымышленными: список и выбор способов загружаются
+обычным импортом Excel, производства — по цехам, явка — у части выбравших.
+
 ## Тесты
 
 ```bash
@@ -207,4 +218,4 @@ python manage.py test
 
 Django создаёт временную тестовую базу, поэтому пользователю PostgreSQL нужно
 право `CREATEDB`. Тесты проверяют вход и роли, кнопки и JSON API, разбор всех видов
-загружаемых файлов и содержимое отчётов.
+загружаемых файлов, содержимое отчётов и демо-данные.
