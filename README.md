@@ -17,16 +17,22 @@
   отчёта по фильтрам (по людям или по производствам, обычный, компактный и ВН).
 - **Админка** — сотрудники с ручными отметками, архив уволенных, пользователи
   с подтягиванием ФИО из кадрового API.
+- **JSON API** — те же данные, загрузки и выгрузки для отдельного фронтенда
+  (`apps/api`, описание — [docs/api.md](docs/api.md)).
 
 ## Стек
 
-Python 3.14, Django 6, PostgreSQL, openpyxl, whitenoise, htmx. Фронтенд без
-сборки: Bootstrap и htmx лежат файлами в `core/static/vendor/`.
+Python 3.14, Django 6, PostgreSQL (psycopg 3), openpyxl, whitenoise, gunicorn, htmx.
+Фронтенд без сборки: Bootstrap и htmx лежат файлами в `core/static/vendor/`.
+Версии библиотек в `requirements.txt` — как на рабочем сервере.
 
 ## Быстрый старт
 
+Драйвер `psycopg` использует библиотеку PostgreSQL: папка `PostgreSQL\<версия>\bin`
+должна быть в PATH.
+
 ```bash
-python -m venv .venv
+py -3.14 -m venv .venv
 .venv\Scripts\activate            # Windows; в Linux: source .venv/bin/activate
 pip install -r requirements.txt
 copy .env.example .env            # и заполните значения
@@ -40,24 +46,35 @@ python manage.py runserver
 
 ## Настройки
 
-Пароли, ключ и адреса в код не пишутся: `config/settings.py` берёт их из
-файла `.env` (в git не попадает, образец — `.env.example`).
+Всё, что отличается между машинами, — в `.env` (образец — `.env.example`): ключ, база,
+адреса. Код одинаковый дома и на работе.
 
-| Переменная | Что это |
-| --- | --- |
-| `DEBUG` | `True` только на машине разработчика |
-| `SECRET_KEY` | ключ Django; на сервере обязателен свой |
-| `ALLOWED_HOSTS` | адреса сайта через запятую |
-| `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` | подключение к PostgreSQL |
-| `HR_SERVICE_API_URL` | адрес кадрового API для админки |
+- `config/settings/base.py` — общие настройки, `dev.py` — разработка (`manage.py`
+  по умолчанию), `prod.py` — сервер (`wsgi.py`, gunicorn).
+- `HR_SERVICE_API_URL` — кадровый API для админки; пусто — функция выключена.
+- `CORS_ALLOWED_ORIGINS` — адрес фронтенда, если он открывается с другого адреса
+  (нужна библиотека `django-cors-headers`); пусто — CORS выключен.
 
-При `DEBUG=False` статику раздаёт whitenoise, её нужно собрать:
-`python manage.py collectstatic`. Точка входа для веб-сервера — `config.wsgi`.
+### Запуск на сервере
+
+```bash
+export DJANGO_SETTINGS_MODULE=config.settings.prod
+python manage.py migrate
+python manage.py collectstatic --noinput
+gunicorn config.wsgi --bind 127.0.0.1:8000
+```
+
+В `.env` сервера: `ALLOWED_HOSTS` с именем сервера; за nginx — `USE_X_FORWARDED_HOST`
+и `CSRF_TRUSTED_ORIGINS`; если несколько сервисов на одном имени — свои
+`SESSION_COOKIE_NAME` и `CSRF_COOKIE_NAME`.
 
 ## Структура
 
 ```text
-config/                       настройки проекта: settings, корневые адреса, wsgi/asgi
+config/                       настройки (settings/base, dev, prod), корневые адреса, wsgi/asgi
+apps/
+└── api/                      JSON API для отдельного фронтенда (адреса /api/…)
+docs/api.md                   описание JSON API
 core/                         приложение «Учёт голосования»
 ├── models.py                 EmployeeBase → Employee и EmployeeArchive, Profile; коды способов
 ├── admin.py                  админка: сотрудники, архив уволенных, пользователи
@@ -72,7 +89,7 @@ core/                         приложение «Учёт голосован
 │   └── auth.py               вход и выход
 ├── services/                 логика без HTTP
 │   ├── excel.py              чтение xlsx, общие константы и утилиты
-│   ├── importing.py          импорт: сотрудники, явка, кастомный отчёт, отметки
+│   ├── importing.py          импорт: сотрудники, способы, явка, кастомный отчёт, отметки
 │   ├── archiver.py           ReportArchiver: сборка книг Excel в ZIP в памяти
 │   └── reports/
 │       ├── standard.py       сводки, отчёты по производствам, архивы по цехам
@@ -137,6 +154,7 @@ core/                         приложение «Учёт голосован
 | Явка из отчётов штаба | .zip с .xlsx: табельный номер, дата и время голосования |
 | Кастомный сводный отчёт | .xlsx или .zip: план, регистрация, явка и отметки по шапке отчёта |
 | Голосование через ответственного | .xlsx или .zip: колонки «Таб» и «Отметка»; шаблон — на странице отчётов |
+| Способы голосования из отчёта штаба (только через API) | .xlsx: «Таб.№» и «1» в колонке выбранного способа |
 
 Производство в файле сотрудников не приходит. Его проставляет команда, которая
 читает справочник «цех — производство» из внешней базы (пароль спрашивается
@@ -188,5 +206,5 @@ python manage.py test
 ```
 
 Django создаёт временную тестовую базу, поэтому пользователю PostgreSQL нужно
-право `CREATEDB`. Тесты проверяют вход и роли, кнопки API, разбор всех видов
+право `CREATEDB`. Тесты проверяют вход и роли, кнопки и JSON API, разбор всех видов
 загружаемых файлов и содержимое отчётов.

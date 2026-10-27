@@ -10,7 +10,7 @@
 import io
 import zipfile
 from pathlib import PurePosixPath
-from typing import Any, Optional
+from typing import Any
 
 
 class ArchiveError(Exception):
@@ -22,8 +22,6 @@ class ArchiveError(Exception):
         пустое имя файла, попытка добавить дубликат без разрешения перезаписи,
         попытка собрать пустой архив.
     """
-
-    pass
 
 
 class ReportArchiver:
@@ -57,7 +55,7 @@ class ReportArchiver:
         self._files: dict[str, bytes] = {}
         self._compression = compression
 
-    def _key(self, filename: str, folder: Optional[str]) -> str:
+    def _key(self, filename: str, folder: str | None) -> str:
         """
         Формирует нормализованный путь файла внутри архива.
 
@@ -84,9 +82,9 @@ class ReportArchiver:
         self,
         filename: str,
         content: bytes,
-        folder: Optional[str] = None,
+        folder: str | None = None,
         overwrite: bool = False,
-    ) -> "ReportArchiver":
+    ) -> ReportArchiver:
         """
         Добавляет файл в будущий архив.
 
@@ -116,9 +114,9 @@ class ReportArchiver:
         self,
         workbook: Any,
         filename: str,
-        folder: Optional[str] = None,
+        folder: str | None = None,
         overwrite: bool = False,
-    ) -> "ReportArchiver":
+    ) -> ReportArchiver:
         """
         Добавляет книгу Excel (openpyxl) в архив.
 

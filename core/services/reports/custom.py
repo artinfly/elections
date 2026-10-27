@@ -9,9 +9,10 @@
 """
 
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Any
 
 import openpyxl
 from django.db.models import QuerySet
@@ -231,7 +232,7 @@ def _write_okrug19_tail(
 
 def _percent_denominator_groups(
     short: bool = False, with_total: bool = True
-) -> list[Optional[str]]:
+) -> list[str | None]:
     """
     Возвращает список, параллельный списку предикатов из _custom_groups.
 
@@ -254,7 +255,7 @@ def _percent_denominator_groups(
         list: список той же длины и порядка, что и предикаты из
             _custom_groups(short, with_total).
     """
-    bases: list[Optional[str]] = []
+    bases: list[str | None] = []
     for group, subs in _custom_groups(short, with_total):
         for sub, _predicate in subs:
             if (
@@ -510,7 +511,7 @@ PEOPLE_LEAD_HEADERS = ("Номер УИК", "Цех", "Таб.№", "ФИО", "�
 
 def _people_table(
     sheet: Any, people: QuerySet, short: bool, with_total: bool
-) -> tuple[int, list[int], dict[str, int], list[Optional[str]]]:
+) -> tuple[int, list[int], dict[str, int], list[str | None]]:
     """
     Шапка и строки отчёта «по людям»: сотрудник — строка, «+» в колонках,
     где выполняется условие колонки.
@@ -571,7 +572,7 @@ def _people_totals(
     people_count: int,
     totals: list[int],
     plan_counts: dict[str, int],
-    denominators: list[Optional[str]],
+    denominators: list[str | None],
 ) -> None:
     """Итоги по колонкам с «+»: число и процент (жирным, по центру)."""
     first_mark_col = len(PEOPLE_LEAD_HEADERS) + 1
@@ -675,12 +676,12 @@ class _GroupStats:
     votes19: int
 
     @classmethod
-    def empty(cls, columns: int) -> "_GroupStats":
+    def empty(cls, columns: int) -> _GroupStats:
         """Нулевые показатели — начальное значение для сумм."""
         return cls(0, [0] * columns, dict.fromkeys(GROUP_PLAN_PREDICATE, 0), 0, 0)
 
     @classmethod
-    def of(cls, persons: list, predicates: list[Callable]) -> "_GroupStats":
+    def of(cls, persons: list, predicates: list[Callable]) -> _GroupStats:
         """Считает показатели по списку людей."""
         return cls(
             people=len(persons),
@@ -693,10 +694,10 @@ class _GroupStats:
             votes19=sum(1 for p in persons if _okrug19_votes(p)),
         )
 
-    def add(self, other: "_GroupStats") -> None:
+    def add(self, other: _GroupStats) -> None:
         """Прибавляет показатели другой группы (для строк «Итого» и «Всего»)."""
         self.people += other.people
-        self.values = [a + b for a, b in zip(self.values, other.values)]
+        self.values = [a + b for a, b in zip(self.values, other.values, strict=True)]
         for group, count in other.plans.items():
             self.plans[group] += count
         self.total19 += other.total19
@@ -713,7 +714,7 @@ class _SummaryLayout:
     tail_start: int  # «Голоса Всего 19 округ»
     short: bool
     column_subs: list[str]  # имена подколонок (чтобы найти колонку «Всего»)
-    denominators: list[Optional[str]]  # см. _percent_denominator_groups
+    denominators: list[str | None]  # см. _percent_denominator_groups
 
 
 def _write_summary_row(
@@ -769,7 +770,7 @@ def _write_summary_total(
 def custom_production_summary(
     params: dict,
     include_depts: bool = False,
-    moment: Optional[datetime] = None,
+    moment: datetime | None = None,
     short: bool = False,
 ) -> Workbook:
     """

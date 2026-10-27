@@ -8,9 +8,10 @@
 """
 
 import re
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date, datetime
-from typing import Any, Iterator, Optional
+from typing import Any
 
 import openpyxl
 from django.db.models import Q
@@ -105,7 +106,7 @@ def _text(value: Any) -> str:
     return str(value).strip()
 
 
-def _date(value: Any) -> Optional[date]:
+def _date(value: Any) -> date | None:
     """
     Разбирает дату из ячейки Excel.
 

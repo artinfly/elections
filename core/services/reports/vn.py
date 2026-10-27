@@ -23,9 +23,10 @@
         в отчёте: они не попадают в левое "Всего" и не влияют на процент.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Any
 
 import openpyxl
 from django.utils import timezone
@@ -103,12 +104,12 @@ class _VnStats:
     votes19: int
 
     @classmethod
-    def empty(cls) -> "_VnStats":
+    def empty(cls) -> _VnStats:
         """Нулевые показатели — начальное значение для сумм."""
         return cls(0, [0] * len(VN_GROUPS), 0, 0, 0)
 
     @classmethod
-    def of(cls, persons: list) -> "_VnStats":
+    def of(cls, persons: list) -> _VnStats:
         """Считает показатели по списку людей."""
         return cls(
             people=len(persons),
@@ -118,10 +119,10 @@ class _VnStats:
             votes19=sum(1 for p in persons if _okrug19_votes(p)),
         )
 
-    def add(self, other: "_VnStats") -> None:
+    def add(self, other: _VnStats) -> None:
         """Прибавляет показатели другой строки (для «Итого» и «Всего»)."""
         self.people += other.people
-        self.values = [a + b for a, b in zip(self.values, other.values)]
+        self.values = [a + b for a, b in zip(self.values, other.values, strict=True)]
         self.voted += other.voted
         self.total19 += other.total19
         self.votes19 += other.votes19
@@ -140,7 +141,7 @@ class _VnLayout:
     percent19_col: int  # «Процент 19 Округ»
 
     @classmethod
-    def for_leads(cls, lead_count: int) -> "_VnLayout":
+    def for_leads(cls, lead_count: int) -> _VnLayout:
         """Колонки идут подряд: ведущие, группы способов, хвостовые."""
         voted_col = lead_count + len(VN_GROUPS) + 1
         return cls(
@@ -234,7 +235,7 @@ def _draw_vn_header(sheet: Any, lead_titles: tuple[str, ...]) -> None:
 def custom_production_summary_vn(
     params: dict,
     include_depts: bool = False,
-    moment: Optional[datetime] = None,
+    moment: datetime | None = None,
 ) -> Workbook:
     """
     Генерирует сводный отчёт по производствам в формате ВН.

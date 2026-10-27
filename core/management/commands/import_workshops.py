@@ -7,7 +7,7 @@
 
 import getpass
 
-import psycopg2
+import psycopg
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
@@ -42,32 +42,26 @@ class Command(BaseCommand):
         """Читает справочник и атомарно переразмечает поле production у сотрудников."""
         # --- Шаг 1. Читаем справочник из внешней базы ---
         password = getpass.getpass("Пароль: ")
-        source = None
+        # Соединение закрывается само при выходе из with, даже при ошибке
         try:
-            source = psycopg2.connect(
+            with psycopg.connect(
                 host=options["host"],
                 port=options["port"],
                 dbname=options["dbname"],
                 user=options["user"],
                 password=password,
-            )
-            with source.cursor() as cursor:
-                cursor.execute(QUERY)
-                fetched = cursor.fetchall()
-        except psycopg2.Error as error:
-            raise CommandError(f"Не удалось прочитать базу: {error}")
-        finally:
-            # Соединение закрываем в любом случае, даже при ошибке
-            if source is not None:
-                source.close()
+            ) as source:
+                fetched = source.execute(QUERY).fetchall()
+        except psycopg.Error as error:
+            raise CommandError(f"Не удалось прочитать базу: {error}") from error
 
         # --- Шаг 2. Собираем словарь {цех: производство} с нормализацией номеров ---
         # Номера цехов приводятся к единому виду (padded_number: "7" -> "007"),
         # пустые значения отбрасываются
         pairs = {}
-        for number, production in fetched:
-            number = str(number or "").strip()
-            production = str(production or "").strip()
+        for raw_number, raw_production in fetched:
+            number = str(raw_number or "").strip()
+            production = str(raw_production or "").strip()
             if number and production:
                 pairs[padded_number(number)] = production
 

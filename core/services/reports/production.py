@@ -9,8 +9,9 @@
 """
 
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Any, Iterable
+from typing import Any
 
 from openpyxl.styles import Alignment, Font
 

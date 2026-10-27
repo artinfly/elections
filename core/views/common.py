@@ -1,6 +1,6 @@
 """Общее для всех view: роли пользователя, фильтр сотрудников, счётчики, контекст списков."""
 
-from typing import Any, Optional
+from typing import Any
 
 from django.core.paginator import Paginator
 from django.db.models import Count, Q, QuerySet
@@ -164,7 +164,7 @@ def filter_employees(params: dict) -> QuerySet:
     return qs
 
 
-def vote_counts(qs: Optional[QuerySet] = None) -> dict[str, Any]:
+def vote_counts(qs: QuerySet | None = None) -> dict[str, Any]:
     """
     Считает агрегированную статистику одним SQL-запросом.
 

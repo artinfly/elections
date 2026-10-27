@@ -8,8 +8,9 @@
     Конструктор отчётов по фильтрам — в reports/custom.py.
 """
 
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Any
 
 import openpyxl
 from django.db.models import Count, Q
@@ -431,7 +432,7 @@ def export_xlsx() -> Any:
 
 
 def department_report(
-    department: str, moment: Optional[datetime] = None, mode: str = "turnout"
+    department: str, moment: datetime | None = None, mode: str = "turnout"
 ) -> Any:
     """
     Формирует отдельный Excel-отчёт по одному цеху.
@@ -538,7 +539,7 @@ def _archive_by_department(build_book: Callable[[str], Any]) -> ReportArchiver:
 
 
 def reports_archive(
-    moment: Optional[datetime] = None, mode: str = "turnout"
+    moment: datetime | None = None, mode: str = "turnout"
 ) -> ReportArchiver:
     """
     Архив отчётов по цехам: явка (mode="turnout") или выбор способа ("method").

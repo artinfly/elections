@@ -11,6 +11,6 @@ import os
 from django.core.asgi import get_asgi_application
 
 # setdefault, как в manage.py: значение из внешнего окружения имеет приоритет
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.prod")
 
 application = get_asgi_application()

@@ -9,8 +9,9 @@
 
 import io
 import zipfile
+from collections.abc import Callable, Iterator
 from datetime import date, datetime, time
-from typing import Any, Callable, Iterator, Optional
+from typing import Any
 
 from django.db.models import F
 from django.utils import timezone
@@ -123,6 +124,84 @@ def import_base(upload: Any) -> tuple[int, int, int]:
         Employee.objects.bulk_update(stale, fields, batch_size=BATCH)
 
     return len(fresh), len(stale), len(parsed)
+
+
+# ==============================================================================
+# Способы голосования из отчёта штаба
+# ==============================================================================
+
+# Заголовок колонки (часть текста) -> код способа; в выбранной колонке стоит «1»
+CHOICE_COLUMNS = {
+    "Очно на своем избирательном участке": UIK,
+    "При помощи дистанционного электронного голосования ДЭГ": DEG,
+    "Очно на временном избирательном участке на территории предприятия": UVZ,
+    "Очно на избирательном участке 19 округа": UIK19,
+}
+
+
+def _choice_header(rows: list) -> tuple[int, int, dict[str, int]]:
+    """Строка шапки: (номер строки, колонка «Таб.№», {способ: колонка})."""
+    for index, row in enumerate(rows):
+        cells = [_text(cell) for cell in row]
+        if "Таб.№" not in cells and "ФИО" not in cells:
+            continue
+        if "Таб.№" not in cells:
+            raise ValueError("Ошибка: не найдена обязательная колонка 'Таб.№'")
+        methods = {
+            method: column
+            for column, cell in enumerate(cells)
+            for title, method in CHOICE_COLUMNS.items()
+            if title in cell
+        }
+        if not methods:
+            raise ValueError("Ошибка: не найдены колонки способов голосования")
+        return index, cells.index("Таб.№"), methods
+    raise ValueError("Ошибка: не найдена строка с заголовками")
+
+
+def import_voting_choices(upload: Any) -> tuple[int, int, int]:
+    """
+    Импортирует выбранные способы голосования из отчёта штаба (поле method).
+
+    В строке должна стоять «1» ровно в одной колонке способа; две и больше
+    отметок — ошибка, ни одной — строка пропускается.
+
+    Возвращает:
+        tuple[int, int, int]: (обновлено, всего строк, ошибок/пропусков).
+    """
+    with _sheet(upload) as rows:
+        all_rows = list(rows)
+    if not all_rows:
+        raise ValueError("Ошибка: файл пустой")
+
+    header_index, tab_column, method_columns = _choice_header(all_rows)
+    chosen, total, errors = {}, 0, 0
+    for row in all_rows[header_index + 1 :]:
+        if not any(row):
+            continue
+        total += 1
+        tab = _tab(row[tab_column]) if tab_column < len(row) else ""
+        marked = [
+            method
+            for method, column in method_columns.items()
+            if column < len(row) and _text(row[column]) == "1"
+        ]
+        if len(marked) > 1:
+            errors += 1
+        elif tab and marked:
+            chosen[tab] = marked[0]
+
+    changed = [
+        employee
+        for employee in Employee.objects.filter(tab_number__in=chosen)
+        if employee.method != chosen[employee.tab_number]
+    ]
+    for employee in changed:
+        employee.method = chosen[employee.tab_number]
+    Employee.objects.bulk_update(changed, fields=["method"], batch_size=BATCH)
+
+    found = Employee.objects.filter(tab_number__in=chosen).count()
+    return len(changed), total, errors + len(chosen) - found
 
 
 # ==============================================================================
@@ -374,7 +453,7 @@ def _custom_report_columns(group_row: tuple, sub_row: tuple) -> dict[str, int]:
     return columns
 
 
-def _has_mark(row: tuple, index: Optional[int]) -> bool:
+def _has_mark(row: tuple, index: int | None) -> bool:
     """Есть ли отметка в ячейке: любое непустое значение (так задумано)."""
     return (
         index is not None and index < len(row) and bool(str(row[index] or "").strip())
@@ -499,7 +578,7 @@ def import_custom_report_archive(upload: Any) -> tuple[int, int, int]:
     for workbook in _workbooks(upload):
         with _sheet(workbook) as rows:
             result = _import_custom_sheet(list(rows))
-        totals = [a + b for a, b in zip(totals, result)]
+        totals = [a + b for a, b in zip(totals, result, strict=True)]
     return tuple(totals)
 
 

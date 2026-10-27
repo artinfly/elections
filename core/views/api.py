@@ -1,7 +1,7 @@
 """JSON API для кнопок на страницах: отметки способа, регистрации и явки без перезагрузки."""
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
@@ -37,7 +37,7 @@ def _known_method(value: Any) -> str:
 
 def _parse_json_body(
     request: HttpRequest,
-) -> tuple[Optional[dict], Optional[JsonResponse]]:
+) -> tuple[dict | None, JsonResponse | None]:
     """
     Безопасно извлекает JSON из тела POST-запроса.
 
@@ -57,7 +57,7 @@ def _parse_json_body(
         return None, JsonResponse({"error": "неверный формат запроса"}, status=400)
 
 
-def _safe_int(value: Any) -> Optional[int]:
+def _safe_int(value: Any) -> int | None:
     """
     Безопасно преобразует значение в целое число.
 
